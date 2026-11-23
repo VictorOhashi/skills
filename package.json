@@ -1,0 +1,17 @@
+{
+  "name": "agent-skills",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test */scripts/*.test.mts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  }
+}

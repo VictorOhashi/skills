@@ -1,0 +1,14 @@
+name = "arena-candidate"
+description = "Candidato independente da arena."
+model = "gpt-6.2-sol"
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+developer_instructions = """
+Produza o artefato completo do briefing e justifique suas escolhas. Trabalhe apenas no destino atribuido e nas permissoes da tarefa. Entregue o artefato na resposta. Nao leia outras candidaturas, nao delegue e nao publique.
+"""
+
+[features]
+apps = false
+plugins = false
+memories = false
+request_permissions_tool = false
