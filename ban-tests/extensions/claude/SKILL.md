@@ -1,3 +1,3 @@
 ## Claude Code
 
-Inicie o subagente `test-reviewer` com o briefing e o diff da tarefa, incluindo o conteudo pertinente dos arquivos novos.
+Inicie o subagente `test-reviewer` com o escopo, o diff e o conteudo pertinente dos arquivos novos.
