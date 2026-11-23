@@ -1,18 +1,30 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
-import { REVIEWERS, parseReviewerToml, reviewerEffort } from "./codex-review.mts";
+import { isReviewerRole, parseReviewerToml, reviewerEffort } from "./codex-review.mts";
 
 const SKILLS = path.dirname(import.meta.dirname);
-const ROLE_FILES: Record<(typeof REVIEWERS)[number], string> = {
-  "validation-reviewer": "validation-loop",
-  "council-reviewer": "council",
-  "comment-reviewer": "ban-comments",
-  "test-reviewer": "ban-tests",
-  "legacy-reviewer": "ban-legacy",
-  "pattern-reviewer": "ban-bad-pattern",
-};
+
+async function catalogReviewerFiles(): Promise<string[]> {
+  const files: string[] = [];
+  for (const skill of await readdir(SKILLS)) {
+    const dir = path.join(SKILLS, skill, "extensions", "codex", "agents");
+    const names = await readdir(dir).catch(() => []);
+    for (const name of names) {
+      if (name.endsWith(".toml") && isReviewerRole(name.slice(0, -".toml".length))) files.push(path.join(dir, name));
+    }
+  }
+  return files;
+}
+
+test("isReviewerRole accepts only names ending in -reviewer", () => {
+  assert.ok(isReviewerRole("validation-reviewer"));
+  assert.ok(isReviewerRole("comment-reviewer"));
+  for (const name of ["pr-observer", "arena-candidate", "reviewer", "-reviewer", "../x-reviewer", "x-reviewer.toml", "X-reviewer"]) {
+    assert.equal(isReviewerRole(name), false, name);
+  }
+});
 
 test("reviewerEffort lets callers lower validation effort only within the allowed list", () => {
   assert.equal(reviewerEffort("validation-reviewer", "high", undefined), "high");
@@ -23,12 +35,26 @@ test("reviewerEffort lets callers lower validation effort only within the allowe
   assert.throws(() => reviewerEffort("council-reviewer", "high", "medium"), /not allowed for council-reviewer; use high$/);
 });
 
+test("every reviewer a Codex extension runs has its role file in the catalog", async () => {
+  const roles = new Set((await catalogReviewerFiles()).map((file) => path.basename(file, ".toml")));
+  let used = 0;
+  for (const skill of await readdir(SKILLS)) {
+    const text = await readFile(path.join(SKILLS, skill, "extensions", "codex", "SKILL.md"), "utf8").catch(() => "");
+    for (const match of text.matchAll(/codex-review\.mts (\S+)/g)) {
+      used += 1;
+      assert.ok(roles.has(match[1] ?? ""), `${skill} runs ${match[1]} without a role file`);
+    }
+  }
+  assert.ok(used > 0);
+});
+
 test("parseReviewerToml reads every reviewer role file of the catalog", async () => {
-  for (const role of REVIEWERS) {
-    const file = path.join(SKILLS, ROLE_FILES[role], "extensions", "codex", "agents", `${role}.toml`);
+  const files = await catalogReviewerFiles();
+  assert.ok(files.some((file) => file.endsWith("validation-reviewer.toml")));
+  for (const file of files) {
     const spec = parseReviewerToml(await readFile(file, "utf8"));
-    assert.ok(spec.model && spec.effort, role);
-    assert.ok(spec.instructions.length > 20 && !spec.instructions.startsWith("\n") && !spec.instructions.includes('"""'), role);
+    assert.ok(spec.model && spec.effort, file);
+    assert.ok(spec.instructions.length > 20 && !spec.instructions.startsWith("\n") && !spec.instructions.includes('"""'), file);
   }
 });
 

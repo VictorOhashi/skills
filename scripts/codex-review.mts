@@ -8,8 +8,10 @@ import path from "node:path";
 import { parseArgs, promisify } from "node:util";
 
 const exec = promisify(execFile);
-export const REVIEWERS = ["validation-reviewer", "council-reviewer", "comment-reviewer", "test-reviewer", "legacy-reviewer", "pattern-reviewer"] as const;
-export type Reviewer = (typeof REVIEWERS)[number];
+/** Reviewer roles are the Codex agents named `<name>-reviewer`; other agents (observers, candidates) cannot run here. */
+export function isReviewerRole(name: string): boolean {
+  return /^[a-z0-9]+(-[a-z0-9]+)*-reviewer$/.test(name);
+}
 /** Where the profile rule keeps artifacts (follows `HOME`); reviewer output must stay inside it. */
 export const DEFAULT_ROOT = path.join(os.homedir(), ".agents", "artifacts");
 
@@ -17,19 +19,15 @@ export const DEFAULT_ROOT = path.join(os.homedir(), ".agents", "artifacts");
  * Lighter efforts a caller may pick per role, besides the TOML's own. The caller can only lower effort
  * within this list: `validation-loop` sizes the review by its diff, and the council always runs at full effort.
  */
-const LIGHTER_EFFORTS: Record<Reviewer, readonly string[]> = {
+const LIGHTER_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "validation-reviewer": ["medium"],
-  "council-reviewer": [],
-  "comment-reviewer": [],
-  "test-reviewer": [],
-  "legacy-reviewer": [],
-  "pattern-reviewer": [],
 };
 
-export function reviewerEffort(role: Reviewer, defined: string, requested: string | undefined): string {
+export function reviewerEffort(role: string, defined: string, requested: string | undefined): string {
   if (requested === undefined || requested === defined) return defined;
-  if (!LIGHTER_EFFORTS[role].includes(requested)) {
-    throw new Error(`Effort ${requested} is not allowed for ${role}; use ${[defined, ...LIGHTER_EFFORTS[role]].join(" or ")}`);
+  const lighter = LIGHTER_EFFORTS[role] ?? [];
+  if (!lighter.includes(requested)) {
+    throw new Error(`Effort ${requested} is not allowed for ${role}; use ${[defined, ...lighter].join(" or ")}`);
   }
   return requested;
 }
@@ -120,7 +118,7 @@ async function priorSession(previous: string, destination: string, role: string,
 }
 
 export type ReviewRequest = {
-  role: Reviewer;
+  role: string;
   output: string;
   repo: string;
   previous: string | undefined;
@@ -135,6 +133,7 @@ export type ReviewRequest = {
 /** A separate Codex session owns its sandbox; native subagents would inherit the writer's policy. */
 export async function runReview(request: ReviewRequest): Promise<void> {
   const { role, output, repo, previous, briefing } = request;
+  if (!isReviewerRole(role)) throw new Error(`Not a reviewer role: ${role}`);
   const roleFile = path.join(request.agentsDir, `${role}.toml`);
   const spec = parseReviewerToml(await readFile(roleFile, "utf8").catch((error: unknown) => {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
@@ -241,13 +240,13 @@ async function main(argv: string[]): Promise<number> {
     options: { repo: { type: "string" }, effort: { type: "string" } },
   });
   const [roleArg, output, previous, ...extra] = positionals;
-  const role = REVIEWERS.find((name) => name === roleArg);
+  const role = roleArg !== undefined && isReviewerRole(roleArg) ? roleArg : undefined;
   let briefing = "";
   if (role && output && values.repo && extra.length === 0) {
     for await (const chunk of process.stdin) briefing += String(chunk);
   }
   if (!role || !output || !values.repo || extra.length > 0 || !briefing.trim()) {
-    throw new Error(`Usage: codex-review.mts <${REVIEWERS.join("|")}> <output-dir> [prior-round-dir] --repo <path> [--effort <level>] < briefing.txt`);
+    throw new Error(`Usage: codex-review.mts <name>-reviewer <output-dir> [prior-round-dir] --repo <path> [--effort <level>] < briefing.txt`);
   }
   await runReview({
     role, output, repo: values.repo, previous, briefing, effort: values.effort,
