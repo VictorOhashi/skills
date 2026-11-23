@@ -1,14 +1,14 @@
 # Guia de redacao deste repositorio
 
-Regras de `SKILL.md`, `references/` e agentes que so valem neste repositorio. Elas completam a skill [`writing-guide`](../writing-guide/SKILL.md) e a referencia [agent-instructions.md](../writing-guide/references/agent-instructions.md). Siga a skill, a referencia e este guia.
+Regras de `SKILL.md`, `references/` e agentes que so valem neste repositorio. Elas completam a skill [`writing-guide`](../skills/writing-guide/SKILL.md) e a referencia [agent-instructions.md](../skills/writing-guide/references/agent-instructions.md). Siga a skill, a referencia e este guia.
 
 ## Pastas da skill
 
 - O build preserva os nomes e o conteudo de `references/` e `scripts/`, exceto os `*.test.mts` de `scripts/`.
-- Script usado por mais de uma skill fica em `scripts/`, instalado uma vez por harness; a skill o chama por `{{SCRIPTS_DIR}}/<script>.mts`. Script de uma skill so fica em `<skill>/scripts/`.
+- Script usado por mais de uma skill fica em `scripts/`, instalado uma vez por harness; a skill o chama por `{{SCRIPTS_DIR}}/<script>.mts`. Script de uma skill so fica em `skills/<skill>/scripts/`.
 - Script de `scripts/` e TypeScript sem dependencia, rodando direto com `node` (22.18+). O typecheck do repo cobre a pasta e os testes ficam ao lado do script, em `scripts/*.test.mts`, e nao entram no build.
 - Use a extensao `.mts`: a pasta compilada nao tem `package.json`. Se o script exporta funcoes para teste, compare `realpathSync(process.argv[1])` com `import.meta.filename` antes de rodar o `main`, porque a harness acessa a skill por symlink.
-- Pasta da raiz sem `SKILL.md`, como `docs/`, nao e skill e nao entra no build. `scripts/` e reservada aos scripts compartilhados.
+- Cada skill fica em `skills/<nome>/`. Na raiz ficam so `scripts/` (compartilhados), `docs/` e os arquivos do repositorio.
 
 ## Harness
 

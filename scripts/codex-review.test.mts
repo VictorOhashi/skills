@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { isReviewerRole, parseReviewerToml, reviewerEffort } from "./codex-review.mts";
 
-const SKILLS = path.dirname(import.meta.dirname);
+const SKILLS = path.join(path.dirname(import.meta.dirname), "skills");
 
 async function catalogReviewerFiles(): Promise<string[]> {
   const files: string[] = [];
