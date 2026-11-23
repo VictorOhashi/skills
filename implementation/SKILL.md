@@ -29,4 +29,13 @@ Entregue o comportamento pedido pelo caminho que o produto usa. Aplique os crite
 
 ## Comentarios e documentacao
 
-Prefira nomes, tipos e fluxo que mostrem o que acontece. Comente o motivo de uma decisao, uma invariante ou uma restricao externa quando o leitor precisaria redescobri-la. Atualize contratos publicos, instrucoes operacionais e comentarios afetados pela mudanca. Evite repetir em texto o que o codigo ou o manifesto ja responde.
+Nao comente por padrao. Primeiro tente dizer o mesmo no codigo: nome, tipo, funcao extraida, teste ou regra de lint.
+
+Comente so o que o codigo nao consegue dizer, em uma ou duas frases sobre o porque:
+
+- Restricao de dependencia, plataforma, fornecedor ou protocolo externo, com o link quando houver.
+- Motivo de uma decisao que parece errada, quando nome, tipo ou teste nao a tornam evidente.
+- Contrato de API publica.
+- Licenca, diretiva de ferramenta e supressao de lint cuja regra so trata de estilo ou nao se aplica ao caso.
+
+Nao narre o codigo nem deixe historico da mudanca, TODO ou codigo comentado. Na documentacao, escreva so instrucao operacional e contrato publico. Atualize ou remova o texto que a mudanca tornou falso.
