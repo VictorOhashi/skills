@@ -1,6 +1,6 @@
 # Acessibilidade
 
-Cada item com criterio WCAG 2.2 AA entre parenteses e piso: vale em qualquer estetica, inclusive contra token do projeto (ver a Precedencia da skill). O piso segue o criterio citado com as excecoes dele: componente inativo, texto decorativo e logotipo em 1.4.3 e 1.4.11; espacamento, alvo dentro de texto e controle equivalente em 2.5.8; zoom de pagina cumpre 1.4.4. Os demais sao valores do guia, das diretrizes da Apple e do Material, e seguem a precedencia. A plataforma do projeto pode exigir mais.
+Cada item com criterio WCAG 2.2 AA entre parenteses e piso: vale em qualquer estetica, inclusive contra token do projeto (ver a Precedencia da skill). O piso segue o criterio citado com as excecoes dele: componente inativo, texto decorativo e logotipo em 1.4.3 e 1.4.11; espacamento, alvo dentro de texto e controle equivalente em 2.5.8; zoom de pagina cumpre 1.4.4. Os demais sao valores desta skill, das diretrizes da Apple e do Material, e seguem a precedencia. A plataforma do projeto pode exigir mais.
 
 ## Percepcao
 
@@ -42,12 +42,10 @@ Cada item com criterio WCAG 2.2 AA entre parenteses e piso: vale em qualquer est
 - Erro diz o problema e a correcao, sem codigo tecnico cru (3.3.1, 3.3.3).
 - No envio com erro, o foco vai ao primeiro campo com erro.
 - Transacao financeira ou legal e alteracao de dados do usuario sao reversiveis, revisadas antes do envio ou confirmadas (3.3.4).
-- Acao destrutiva e irreversivel pede confirmacao. O resto oferece desfazer.
 
 ## Preferencias do usuario
 
 - Texto ampliado a 200%: o layout cresce sem cortar nem perder acao (1.4.4; ver [typography.md](typography.md#escala-com-o-usuario)).
-- Movimento reduzido: ver [motion-values.md](motion-values.md#movimento-reduzido).
+- Movimento reduzido: ver [motion.md](motion.md#movimento-reduzido).
 - Com transparencia reduzida, superficies translucidas ficam solidas.
 - Com contraste aumentado, fundos ficam quase solidos e ganham borda definida.
-- Tema escuro nao e inversao: confira contraste, sombras e logos no tema escuro.

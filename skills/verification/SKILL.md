@@ -33,10 +33,6 @@ Comprove o comportamento atual com evidencia proporcional ao risco e declare o q
 
 ## 3. Conformidade com o design
 
-Em toda mudanca visual, antes de entregar, confira os itens abaixo. Sem design system, confira contra os padroes existentes do app e da plataforma.
-
-- Cada controle usa o componente do design system do projeto, nao um nativo ou estilizado do zero.
-- Cores, tipografia, espacamento e raio vem dos tokens do projeto, nao de valores literais.
-- Detalhes de interface que nao sao escolha de estilo (hierarquia e layout, tipografia, conteudo e estados, acessibilidade, motion e gesto) seguem a skill `design-guide`, nas areas que a mudanca toca; ela coloca o DS e os padroes do app acima dela, salvo o piso de acessibilidade.
+Em toda mudanca visual, antes de entregar, confira a mudanca pela skill `principle-ui-design`, no modo de verificar mudanca implementada.
 
 Relate essa checagem no status, citando o que foi conferido, e inclua-a nas verificacoes do corpo do PR.

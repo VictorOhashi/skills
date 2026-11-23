@@ -16,7 +16,6 @@ As skills nao funcionam copiando a pasta como esta. Um build junta `SKILL.md` co
 | [`ban-tests`](skills/ban-tests/SKILL.md) | Aponta e retira testes que nao protegem uma regra do produto. |
 | [`correct-repo`](skills/correct-repo/SKILL.md) | Corrige a causa de erros que agentes repetem no repositorio. |
 | [`council`](skills/council/SKILL.md) | Conselho de revisores que da nota por rubrica ate a nota alvo. |
-| [`design-guide`](skills/design-guide/SKILL.md) | Detalhes de design de interface: hierarquia, tipografia, estados, motion. |
 | [`full-send`](skills/full-send/SKILL.md) | Leva a tarefa ate o PR mergeado. |
 | [`github-issue-read`](skills/github-issue-read/SKILL.md) | Le issue ou PR do GitHub inteiro para uma pasta local. |
 | [`implementation`](skills/implementation/SKILL.md) | Causa raiz, tipagem forte, migracao de legado e comentarios uteis. |
@@ -24,6 +23,7 @@ As skills nao funcionam copiando a pasta como esta. Um build junta `SKILL.md` co
 | [`planning`](skills/planning/SKILL.md) | Analise e plano com causa raiz, contratos e escopo controlado. |
 | [`pr-format`](skills/pr-format/SKILL.md) | Titulo, descricao e evidencias de pull requests. |
 | [`pr-prints`](skills/pr-prints/SKILL.md) | Prints de mudanca visual anexados a PR ou issue. |
+| [`principle-ui-design`](skills/principle-ui-design/SKILL.md) | Principios de design de interface para desenhar e revisar telas: hierarquia, estados, texto, interacao, motion. |
 | [`send`](skills/send/SKILL.md) | Leva a tarefa ate o PR pronto para merge. |
 | [`validation-loop`](skills/validation-loop/SKILL.md) | Revisao final com revisor independente, em ate 3 rodadas. |
 | [`verification`](skills/verification/SKILL.md) | Menor verificacao suficiente antes de afirmar que funciona. |
