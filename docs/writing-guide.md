@@ -57,5 +57,4 @@ A descricao da skill define quando usa-la. Skills seguem a regra de dependencia 
 
 ## Excecoes
 
-- `anti-patterns.md` de `design-guide` e um checklist que repete, por sintoma, regras que moram nas outras referencias da skill. Linha cuja correcao tem valor aponta para a regra em vez de repetir o valor.
-- As skills `ban-*` trazem os proprios criterios, mesmo quando repetem parte das referencias de `implementation`, para que o revisor receba um texto completo.
+- As skills `ban-*` trazem os proprios criterios, mesmo quando repetem parte das referencias de `implementation` ou das regras de `verification`, para que o revisor receba um texto completo.
