@@ -6,9 +6,9 @@ Regras de onde fica cada script e como escreve-lo: "Pastas da skill" em [writing
 | --- | --- | --- |
 | `artifacts.mts` | `scripts/` | Cria, limpa e resume pastas de artefatos. |
 | `codex-review.mts` | `scripts/` | Executa um revisor em sessao Codex isolada e somente leitura. |
-| `pr-state.mts` | `send/scripts/` | Le o estado de um PR para o acompanhamento de `send`. |
-| `review-scope.mts` | `validation-loop/scripts/` | Fixa base, escopo e nivel da revisao. |
-| `github-issue-read.mts` | `github-issue-read/scripts/` | Grava issue ou PR do GitHub numa pasta local. |
+| `pr-state.mts` | `skills/send/scripts/` | Le o estado de um PR para o acompanhamento de `send`. |
+| `review-scope.mts` | `skills/validation-loop/scripts/` | Fixa base, escopo e nivel da revisao. |
+| `github-issue-read.mts` | `skills/github-issue-read/scripts/` | Grava issue ou PR do GitHub numa pasta local. |
 
 ## Revisores isolados no Codex (`codex-review.mts`)
 
