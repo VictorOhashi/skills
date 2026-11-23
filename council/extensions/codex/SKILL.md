@@ -2,7 +2,7 @@
 
 Revisor: sessao independente do Codex CLI, com papel `council-reviewer`, modelo e esforco definidos no TOML do agente.
 
-Execute cada rodada em sessao isolada com `pnpm --dir <repoRoot ativo> agents review council-reviewer <pasta da rodada> --repo <repositorio revisado> < <briefing>`. O `repoRoot` ativo vem de `~/.agents/state.json`. Salve os resultados na pasta de artefatos da execucao do conselho.
+Execute cada rodada em sessao isolada com `node {{SCRIPTS_DIR}}/codex-review.mts council-reviewer <pasta da rodada> --repo <repositorio revisado> < <briefing>`. Salve os resultados na pasta de artefatos da execucao do conselho.
 
 Avaliador inicial, Revisor A e Revisor B sao tres sessoes novas, sem ID de retomada e sem historico da implementacao. Confirme os dados efetivos de cada uma em `runtime.json`: modelo e esforco do TOML, sandbox `read-only`, aprovacao `never`, teste de escrita `denied` e ID proprio.
 

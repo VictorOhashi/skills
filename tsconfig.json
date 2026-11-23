@@ -13,5 +13,5 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["*/scripts"]
+  "include": ["scripts", "*/scripts"]
 }
