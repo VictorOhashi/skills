@@ -1,6 +1,6 @@
 ---
 name: planning
-description: Prepara analise, plano ou implementacao com causa raiz, desenho de contratos e escopo controlado. Use antes de analisar uma issue ou bug, planejar uma mudanca ou comecar a implementar; em mudanca trivial, aplique so os passos pertinentes.
+description: Prepara analise, plano ou implementacao com causa raiz, desenho de contratos e escopo controlado. Use em pedido de plano ou de analise de issue, bug ou mudanca ("me propoe um plano", "como voce faria", "analisa essa issue"), antes de investigar uma issue ou bug, planejar uma mudanca ou comecar a implementar; em mudanca trivial, aplique so os passos pertinentes.
 ---
 
 # Planejamento
