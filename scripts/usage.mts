@@ -58,21 +58,39 @@ export type FailureKind =
 /** A failed shell command; `command` keeps program and subcommand of each step, never arguments. */
 export type CommandFailure = Source & { kind: FailureKind; command: string };
 
+export type CheckKind = "preflight" | "push" | "e2e" | "test" | "typecheck" | "lint" | "build" | "ci-wait";
+
+/**
+ * A verification command and how long it took: from the call to its result, or to the completion notice when it ran
+ * in the background. `outcome` is unknown when the command hides the check's exit code: a pipe without `pipefail`,
+ * `|| ...`, or another command after `;`. Permission denials, interruptions and superseded runs are not recorded.
+ */
+export type CheckRun = Source & {
+  kind: CheckKind;
+  command: string;
+  seconds: number;
+  background: boolean;
+  outcome: "ok" | "fail" | "unknown";
+  /** The command also pushes (`pnpm preflight && git push`), though another check dominates its time. */
+  pushes: boolean;
+};
+
 export type Usage = {
   runs: SkillRun[];
   prompts: PromptEvent[];
   findings: Finding[];
   failures: CommandFailure[];
+  checks: CheckRun[];
 };
 
 type Store = Usage & {
   /** Bumped when parsing changes, so the next ingest re-reads every transcript still on disk. */
-  version: 5;
+  version: 7;
   /** Transcript path -> mtime already ingested. */
   files: Record<string, number>;
 };
 
-const STORE_VERSION = 5;
+const STORE_VERSION = 7;
 const SKILL_HEADER = "Base directory for this skill: ";
 const INTERRUPT = "[Request interrupted by user";
 const WORKTREE = /\/\.(claude|codex)\/worktrees\/[^/]+/;
@@ -83,17 +101,46 @@ const SUBCOMMANDS = new Set(["pnpm", "npm", "yarn", "bun", "npx", "git", "gh", "
 const READ_ONLY = new Set(["cat", "ls", "head", "tail", "grep", "rg", "find", "sed", "awk", "wc", "stat", "file", "tree", "jq", "diff", "git status", "git log", "git show", "git diff", "git rev-parse", "git branch", "git ls-files", "git grep", "git ls-remote"]);
 const TRIVIAL = new Set(["cd", "echo", "printf", "sleep", "export", "set", "true", "false", "test", "[", "local", "source", "for", "done", "fi", "case", "esac", "function", "}", ")"]);
 /** Shell words that start a step: the program comes right after them. */
-const PREFIXES = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "{", "(", "time", "exec"]);
+const PREFIXES = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "{", "(", "time", "exec", "env", "timeout"]);
 const PROGRAM = /^[\w.@+-]+$/;
 /** Flags whose next word is their value, so it is not taken for the subcommand. */
 const VALUE_FLAGS = new Set(["--filter", "-F", "-C", "--dir", "--prefix", "--cwd", "--repo", "-R", "--workspace", "-f", "--file", "-p", "--project", "-n", "--namespace", "--context", "-c", "--git-dir", "--work-tree"]);
+/** Programs that run a project's checks; the check kind comes from their arguments. */
+const RUNNERS = new Set(["pnpm", "npm", "yarn", "bun", "bunx", "npx", "turbo", "nx", "node", "tsx", "make", "cargo", "go", "flutter", "dart", "uv", "pytest", "vitest", "jest", "playwright", "tsc", "eslint", "oxlint", "biome", "ruff", "mypy", "pyright", "gradle", "gradlew", "mvn"]);
+/** First match wins, so a step that names several kinds counts as the broadest one. */
+const CHECK_WORDS: Array<[CheckKind, RegExp]> = [
+  ["preflight", /\bpreflight\b/],
+  ["e2e", /\b(e2e|playwright|golden)\b/],
+  ["test", /\b(test|tests|vitest|jest|pytest)\b/],
+  ["typecheck", /\b(typecheck|tsc|mypy|pyright)\b/],
+  ["lint", /\b(lint|oxlint|eslint|biome|ruff|analyze)\b/],
+  ["build", /\bbuild\b/],
+];
+/** Package manager subcommands that change or inspect dependencies instead of running a check. */
+const NOT_CHECKS = new Set(["add", "install", "i", "remove", "rm", "uninstall", "why", "view", "info", "outdated", "update", "up", "link", "unlink", "pip"]);
+const NOT_RUN = new Set<FailureKind>(["blocked", "denied", "rejected", "interrupted", "outside-worktree"]);
+/** Script runners: the check is named by the script file, not by the directories in its path. */
+const SCRIPT_RUNNERS = new Set(["node", "tsx"]);
+/** When one command runs several checks, it counts as the one that dominates its time. */
+const CHECK_ORDER: CheckKind[] = ["preflight", "push", "e2e", "test", "typecheck", "lint", "build", "ci-wait"];
+/** Runs longer than this are left out of the times: a stuck process or a delayed completion notice. */
+const LATE_SECONDS = 3600;
+const NOTICE = /<task-notification>([\s\S]*?)<\/task-notification>/g;
 
 type Line = Record<string, unknown>;
 type OpenRun = Omit<SkillRun, "reaction"> & { messages: Set<string> };
+type OpenCheck = Omit<CheckRun, "seconds" | "outcome"> & { masked: boolean };
 
 export function parseTranscript(file: string, text: string): Usage {
-  const usage: Usage = { runs: [], prompts: [], findings: [], failures: [] };
+  const usage: Usage = { runs: [], prompts: [], findings: [], failures: [], checks: [] };
   let open: OpenRun[] = [];
+  const checks = new Map<string, OpenCheck>();
+  const finish = (check: OpenCheck, at: string, failed: boolean, outcome?: CheckRun["outcome"]): void => {
+    const { masked, ...rest } = check;
+    const seconds = Math.max(0, (Date.parse(at) - Date.parse(check.at)) / 1000);
+    usage.checks.push({ ...rest, seconds, outcome: outcome ?? (failed ? "fail" : masked ? "unknown" : "ok") });
+    checks.delete(check.id);
+  };
   // Resumed and forked sessions copy earlier records, sometimes more than once.
   const seen = new Set<string>();
   const commands = new Map<string, string>();
@@ -138,7 +185,26 @@ export function parseTranscript(file: string, text: string): Usage {
     }
     for (const block of blocks) {
       if (block?.type === "tool_use" && block.name === "Bash" && typeof block.id === "string") {
-        commands.set(block.id, String(asRecord(block.input)?.command ?? ""));
+        const input = asRecord(block.input);
+        const command = String(input?.command ?? "");
+        commands.set(block.id, command);
+        const check = checkOf(command);
+        if (check) checks.set(block.id, { ...source(block.id), ...check, command: commandSignature(command), background: input?.run_in_background === true });
+      }
+      if (block?.type === "tool_result" && typeof block.tool_use_id === "string") {
+        const check = checks.get(block.tool_use_id);
+        if (check && !check.background) {
+          const output = strings(block.content).join("\n");
+          // A background command answers at once, and so does one moved there after its timeout; its time ends with the completion notice.
+          if (/running in background|moved to the background/.test(output)) check.background = true;
+          else if (block.is_error === true) {
+            const kind = failureKind(output);
+            // A denied, blocked or interrupted call never ran the check to its end.
+            if (NOT_RUN.has(kind)) checks.delete(check.id);
+            // A missing file may be the check's failure or another step's.
+            else finish(check, at, true, kind === "missing-path" || kind === "not-found" ? "unknown" : "fail");
+          } else finish(check, at, false);
+        }
       }
       if (block?.type === "tool_result" && block.is_error === true && typeof block.tool_use_id === "string") {
         const command = commands.get(block.tool_use_id);
@@ -148,6 +214,19 @@ export function parseTranscript(file: string, text: string): Usage {
           const probe = kind === "exit" && signature.split(" && ").every((step) => READ_ONLY.has(step));
           usage.failures.push({ ...source(block.tool_use_id), kind: probe ? "probe" : kind, command: signature });
         }
+      }
+    }
+
+    if (checks.size > 0) {
+      for (const body of noticesOf(line, message)) {
+        const check = checks.get(/<tool-use-id>([^<]+)<\/tool-use-id>/.exec(body)?.[1] ?? "");
+        if (!check?.background) continue;
+        const status = /<status>([^<]+)<\/status>/.exec(body)?.[1];
+        const summary = /<summary>([\s\S]*?)<\/summary>/.exec(body)?.[1] ?? "";
+        const exit = [...summary.matchAll(/exit code (\d+)/g)].at(-1)?.[1];
+        // A run stopped or replaced by the agent did not finish its check.
+        if (status === "killed" || status === "stopped") checks.delete(check.id);
+        else finish(check, at, status === "failed" || (exit !== undefined && exit !== "0"));
       }
     }
 
@@ -205,6 +284,20 @@ function addMetrics(run: OpenRun, line: Line, blocks: Array<Line | undefined>): 
   }
 }
 
+/**
+ * Completion notices of background tasks. Claude Code records each one as a queue entry when it arrives and again
+ * when the session reads it, as an attachment or a user message; the first record carries the real end time.
+ */
+function noticesOf(line: Line, message: Line | undefined): string[] {
+  const texts: string[] = [];
+  if (line.type === "queue-operation" && line.operation === "enqueue" && typeof line.content === "string") texts.push(line.content);
+  const attachment = asRecord(line.attachment);
+  if (line.type === "attachment" && attachment?.type === "queued_command" && typeof attachment.prompt === "string") texts.push(attachment.prompt);
+  // Text blocks only: a tool result that prints a notice is output, not a notice.
+  if (line.type === "user") texts.push(textOf(message?.content));
+  return texts.flatMap((text) => [...text.matchAll(NOTICE)].map((match) => match[1] ?? ""));
+}
+
 function skillLoad(line: Line): { skill: string; version: string } | undefined {
   if (line.type !== "user" || line.isMeta !== true) return undefined;
   const text = textOf(asRecord(line.message)?.content);
@@ -246,11 +339,12 @@ export function failureKind(output: string): FailureKind {
   return "exit";
 }
 
-/** Program, plus subcommand for tools that have one, of each meaningful step: `pnpm test && gh pr`. */
-export function commandSignature(command: string): string {
-  const steps: string[] = [];
-  // Heredoc bodies and quoted text are data, not steps.
-  const shell = command
+/** Separator after the step (`&&`, `||`, `|`, `|&`, `;`, newline), and whether another step follows. */
+type Step = { program: string; args: string[]; next: string | undefined; last: boolean; orAfter: boolean };
+
+/** The shell text with heredoc bodies and quoted text replaced, since they are data. */
+function shellText(command: string): string {
+  return command
     .split("\n")
     .reduce<{ lines: string[]; heredoc: string | undefined }>((state, line) => {
       if (state.heredoc !== undefined) return line.trim() === state.heredoc ? { ...state, heredoc: undefined } : state;
@@ -259,16 +353,64 @@ export function commandSignature(command: string): string {
     }, { lines: [], heredoc: undefined })
     .lines.join("\n")
     .replace(/'[^']*'|"(?:[^"\\]|\\.)*"|\$\([^)]*\)/g, "x");
-  for (const segment of shell.split(/&&|\|\||;|\||\n/)) {
-    const words = segment.trim().split(/\s+/).filter(Boolean);
-    while (words[0] && (/^\w+=/.test(words[0]) || PREFIXES.has(words[0]))) words.shift();
-    const program = words[0] ? path.basename(words[0]) : undefined;
-    if (!program || !PROGRAM.test(program) || TRIVIAL.has(program)) continue;
-    const sub = SUBCOMMANDS.has(program) ? subcommand(words.slice(1)) : undefined;
+}
+
+/** The simple commands of a shell line; `last` is set before trivial commands are dropped, since `echo` and the like set the exit status too. */
+function shellSteps(command: string): Step[] {
+  const parts = shellText(command).split(/(&&|\|\||\|&|;|\||\n)/);
+  const steps: Step[] = [];
+  for (let index = 0; index < parts.length; index += 2) {
+    const words = (parts[index] ?? "").trim().split(/\s+/).filter(Boolean);
+    while (words[0] && (/^\w+=/.test(words[0]) || PREFIXES.has(words[0]))) {
+      // `timeout 600 pnpm test`: the duration and the flags before it are not the program.
+      if (words.shift() === "timeout") while (words[0] && (words[0].startsWith("-") || /^\d/.test(words[0]))) words.shift();
+    }
+    if (words[0]) steps.push({ program: path.basename(words[0]), args: words.slice(1), next: parts[index + 1], last: false, orAfter: false });
+  }
+  const final = steps.at(-1);
+  if (final) final.last = true;
+  // `check && echo ok || echo failed`: an `||` anywhere after a step decides the exit status.
+  let or = false;
+  for (const step of [...steps].reverse()) {
+    step.orAfter = or;
+    if (step.next === "||") or = true;
+  }
+  return steps.filter((step) => PROGRAM.test(step.program) && !TRIVIAL.has(step.program));
+}
+
+/** Program, plus subcommand for tools that have one, of each meaningful step: `pnpm test && gh pr`. */
+export function commandSignature(command: string): string {
+  const steps: string[] = [];
+  for (const { program, args } of shellSteps(command)) {
+    const sub = SUBCOMMANDS.has(program) ? subcommand(args) : undefined;
     const step = sub ? `${program} ${sub}` : program;
     if (!steps.includes(step)) steps.push(step);
   }
   return steps.slice(0, 4).join(" && ") || "(shell)";
+}
+
+/** The verification a command runs, if any, and whether the command hides that step's exit code. */
+export function checkOf(command: string): { kind: CheckKind; masked: boolean; pushes: boolean } | undefined {
+  const shell = shellText(command);
+  const pipefail = /\bset\s+-\w*o\s+pipefail\b/.test(shell);
+  const errexit = /\bset\s+-\w*e/.test(shell);
+  let found: { kind: CheckKind; masked: boolean } | undefined;
+  let pushes = false;
+  for (const { program, args, next, last, orAfter } of shellSteps(command)) {
+    // Flag values (`--filter test-kit`) name targets, not the check.
+    const words = args.filter((word, index) => !word.startsWith("-") && !VALUE_FLAGS.has(args[index - 1] ?? ""));
+    const text = SCRIPT_RUNNERS.has(program) ? path.basename(words[0] ?? "") : words.join(" ");
+    let kind: CheckKind | undefined;
+    if (program === "git" && subcommand(args) === "push") kind = "push", pushes = true;
+    else if ((program === "gh" && /^(pr checks|run watch)/.test(text) && (args.includes("--watch") || text.startsWith("run watch"))) || (/\bpr-state\.mts\b/.test(text) && args.includes("--wait"))) kind = "ci-wait";
+    else if (SCRIPT_RUNNERS.has(program) && args.includes("--test")) kind = "test";
+    else if (NOT_CHECKS.has(subcommand(args) ?? "") || /\bplaywright (install|show-report|codegen)\b/.test(text)) kind = undefined;
+    else if (RUNNERS.has(program) || /preflight/.test(program)) kind = CHECK_WORDS.find(([, pattern]) => pattern.test(`${program} ${text}`))?.[0];
+    if (!kind || (found && CHECK_ORDER.indexOf(kind) >= CHECK_ORDER.indexOf(found.kind))) continue;
+    const masked = next === "||" || orAfter || ((next === "|" || next === "|&") && !pipefail) || ((next === ";" || next === "\n") && !last && !errexit);
+    found = { kind, masked };
+  }
+  return found && { ...found, pushes };
 }
 
 function subcommand(args: string[]): string | undefined {
@@ -357,6 +499,7 @@ export async function ingestUsage(storeDir: string, transcriptsRoot: string): Pr
   store.prompts = merge(store.prompts, (usage) => usage.prompts, () => false);
   store.findings = merge(store.findings, (usage) => usage.findings, (a, b) => a.at < b.at);
   store.failures = merge(store.failures, (usage) => usage.failures, () => false);
+  store.checks = merge(store.checks, (usage) => usage.checks, () => false);
   await mkdir(storeDir, { recursive: true });
   const tmp = `${storePath}.tmp-${process.pid}`;
   await writeFile(tmp, JSON.stringify(store));
@@ -375,7 +518,7 @@ function dedupe<T extends Source>(entries: T[], replaces: (candidate: T, existin
 }
 
 async function loadStore(storePath: string): Promise<Store> {
-  const empty = (): Store => ({ version: STORE_VERSION, files: {}, runs: [], prompts: [], findings: [], failures: [] });
+  const empty = (): Store => ({ version: STORE_VERSION, files: {}, runs: [], prompts: [], findings: [], failures: [], checks: [] });
   const text = await readFile(storePath, "utf8").catch(ignoreMissing);
   if (text === undefined) return empty();
   const raw = JSON.parse(text) as Partial<Store>;
@@ -383,7 +526,7 @@ async function loadStore(storePath: string): Promise<Store> {
   // Another parser version: re-read the transcripts still on disk, keep the entries of deleted ones.
   const store = empty();
   const gone = async (entry: Source): Promise<boolean> => !(await stat(entry.file).then(() => true, () => false));
-  for (const key of ["runs", "prompts", "findings", "failures"] as const) {
+  for (const key of ["runs", "prompts", "findings", "failures", "checks"] as const) {
     const entries = Array.isArray(raw[key]) ? (raw[key] as Source[]) : [];
     const kept: Source[] = [];
     for (const entry of entries) if (typeof entry?.file === "string" && (await gone(entry))) kept.push(entry);
@@ -443,11 +586,30 @@ export type RepoStats = {
   shoulds: number;
   /** Failed commands, reads with no result (`probe`) left out. */
   failures: number;
+  /** Time spent in verification commands (checks, pushes, CI waits). */
+  checkHours: number;
   lastActive: string;
 };
 
 export type AreaStats = { area: string; blockers: number; shoulds: number; sessions: number; last: string };
 export type FailureStats = { kind: FailureKind; command: string; count: number; sessions: number; last: string };
+export type CheckStats = {
+  kind: CheckKind;
+  runs: number;
+  background: number;
+  sessions: number;
+  /** Time stats leave out `late` runs: longer than an hour, a stuck process or a delayed notice. */
+  late: number;
+  medianSeconds: number;
+  p90Seconds: number;
+  totalHours: number;
+  failRate: number;
+  /** Runs whose command hides the exit code (pipe without pipefail, `|| ...`, a command after `;`): their failures do not show. */
+  unknownRate: number;
+  /** Runs of this kind per session that ran it. */
+  medianPerSession: number;
+  p90PerSession: number;
+};
 
 export function since<T extends Source>(entries: T[], from: Date): T[] {
   const iso = from.toISOString();
@@ -490,14 +652,15 @@ function runMetrics(group: SkillRun[]) {
 }
 
 export function repoReport(usage: Usage): RepoStats[] {
-  const repos = new Set([...usage.prompts, ...usage.findings, ...usage.failures].map((entry) => entry.repo));
+  const repos = new Set([...usage.prompts, ...usage.findings, ...usage.failures, ...usage.checks].map((entry) => entry.repo));
   return [...repos]
     .map((repo): RepoStats => {
       const prompts = usage.prompts.filter((entry) => entry.repo === repo);
       const typed = prompts.filter((entry) => entry.kind !== "interrupt");
       const findings = usage.findings.filter((entry) => entry.repo === repo);
       const failures = usage.failures.filter((entry) => entry.repo === repo);
-      const all = [...prompts, ...findings, ...failures];
+      const checks = usage.checks.filter((entry) => entry.repo === repo);
+      const all = [...prompts, ...findings, ...failures, ...checks];
       const realFailures = failures.filter((entry) => entry.kind !== "probe");
       return {
         repo,
@@ -508,6 +671,7 @@ export function repoReport(usage: Usage): RepoStats[] {
         blockers: findings.filter((entry) => entry.severity === "blocker").length,
         shoulds: findings.filter((entry) => entry.severity === "should").length,
         failures: realFailures.length,
+        checkHours: sum(checks.map((entry) => entry.seconds).filter((value) => value <= LATE_SECONDS)) / 3600,
         lastActive: all.reduce((last, entry) => (entry.at > last ? entry.at : last), ""),
       };
     })
@@ -545,6 +709,46 @@ export function failureReport(failures: CommandFailure[]): FailureStats[] {
     .sort((a, b) => b.sessions - a.sessions || b.count - a.count);
 }
 
+export type SessionChecks = { file: string; kind: CheckKind; runs: number; pushes: number; last: string };
+
+/** Sessions that ran `kind` most, with their pushes: more runs than pushes means the gate ran again before publishing. */
+export function busiestSessions(checks: CheckRun[], kind: CheckKind, limit = 10): SessionChecks[] {
+  return [...groupBy(checks, (entry) => entry.sessionId).values()]
+    .map((group) => ({
+      file: group[0]?.file ?? "",
+      kind,
+      runs: group.filter((entry) => entry.kind === kind).length,
+      pushes: group.filter((entry) => entry.kind === "push" || entry.pushes).length,
+      last: group.at(-1)?.at ?? "",
+    }))
+    .filter((session) => session.runs > 0)
+    .sort((a, b) => b.runs - b.pushes - (a.runs - a.pushes) || b.runs - a.runs)
+    .slice(0, limit);
+}
+
+export function checkReport(checks: CheckRun[]): CheckStats[] {
+  return [...groupBy(checks, (entry) => entry.kind)]
+    .map(([kind, group]): CheckStats => {
+      const seconds = group.map((entry) => entry.seconds).filter((value) => value <= LATE_SECONDS);
+      const perSession = [...groupBy(group, (entry) => entry.sessionId).values()].map((runs) => runs.length);
+      return {
+        kind: kind as CheckKind,
+        runs: group.length,
+        background: group.filter((entry) => entry.background).length,
+        sessions: perSession.length,
+        late: group.length - seconds.length,
+        medianSeconds: median(seconds),
+        p90Seconds: percentile(seconds, 0.9),
+        totalHours: sum(seconds) / 3600,
+        failRate: group.filter((entry) => entry.outcome === "fail").length / group.length,
+        unknownRate: group.filter((entry) => entry.outcome === "unknown").length / group.length,
+        medianPerSession: median(perSession),
+        p90PerSession: percentile(perSession, 0.9),
+      };
+    })
+    .sort((a, b) => b.totalHours - a.totalHours);
+}
+
 export function parseSince(value: string | undefined, now = new Date()): Date {
   const raw = value ?? "30d";
   const match = /^(\d+)d$/.exec(raw);
@@ -569,6 +773,13 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? (sorted[mid] ?? 0) : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+}
+
+function percentile(values: number[], rank: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  // Nearest rank: the smallest value with at least `rank` of the values at or below it.
+  return sorted[Math.max(0, Math.ceil(rank * sorted.length) - 1)] ?? 0;
 }
 
 function sum(values: number[]): number {
@@ -616,7 +827,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
   if ((command !== "skills" && command !== "repos") || rest.length > 0) throw new Error(USAGE);
   const all = await ingestUsage(values.store ?? DEFAULT_STORE, values.transcripts ?? DEFAULT_TRANSCRIPTS);
   const from = parseSince(values.since);
-  const usage: Usage = { runs: since(all.runs, from), prompts: since(all.prompts, from), findings: since(all.findings, from), failures: since(all.failures, from) };
+  const usage: Usage = { runs: since(all.runs, from), prompts: since(all.prompts, from), findings: since(all.findings, from), failures: since(all.failures, from), checks: since(all.checks, from) };
   const emit = (value: unknown, lines: () => string[]): number => {
     if (values.json) print(JSON.stringify(value, null, 2));
     else for (const line of lines()) print(line);
@@ -659,8 +870,19 @@ export async function main(argv: string[], print: (line: string) => void = conso
     const corrections = only(usage.prompts).filter((entry) => entry.kind === "correction").slice(-15).reverse();
     const findings = only(usage.findings).filter((entry) => entry.severity === "blocker" || entry.severity === "should").slice(-15).reverse();
     const recentFailures = only(usage.failures).filter((entry) => entry.kind !== "probe").slice(-15).reverse();
-    return emit({ repo, since: from.toISOString(), areas, failures, corrections, findings, recentFailures }, () => [
+    const checks = checkReport(only(usage.checks));
+    const gate = checks.find((stats) => stats.kind !== "push" && stats.kind !== "ci-wait")?.kind;
+    const busiest = gate ? busiestSessions(only(usage.checks), gate) : [];
+    const slowest = only(usage.checks).filter((entry) => entry.seconds <= LATE_SECONDS).sort((a, b) => b.seconds - a.seconds).slice(0, 10);
+    return emit({ repo, since: from.toISOString(), checks, busiest, slowest, areas, failures, corrections, findings, recentFailures }, () => [
       `${repo} since ${day(from.toISOString())}`,
+      "verification time (checks, pushes, CI waits):",
+      ...table(["kind", "runs", "bg", "late", "sess", "p50 s", "p90 s", "total h", "fail", "unknown", "per sess p50", "p90"], checks.map((stats) => [
+        stats.kind, String(stats.runs), String(stats.background), String(stats.late), String(stats.sessions), String(Math.round(stats.medianSeconds)), String(Math.round(stats.p90Seconds)),
+        stats.totalHours.toFixed(1), percent(stats.failRate), percent(stats.unknownRate), String(stats.medianPerSession), String(stats.p90PerSession),
+      ])),
+      ...(checks.some((stats) => stats.unknownRate > 0) ? ["unknown: the command hides the exit code (pipe without pipefail, `|| ...`, a command after `;`), so a failure would not show"] : []),
+      ...(checks.some((stats) => stats.late > 0) ? ["late: over an hour, left out of the times (stuck process or delayed notice)"] : []),
       "review findings by area (blocker and should):",
       ...table(["area", "blocker", "should", "sess", "last"], areas.slice(0, 15).map((stats) => [stats.area, String(stats.blockers), String(stats.shoulds), String(stats.sessions), day(stats.last)])),
       `failed commands (${sum(probes.map((stats) => stats.count))} failed reads left out; see --json):`,
@@ -671,14 +893,18 @@ export async function main(argv: string[], print: (line: string) => void = conso
       ...findings.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.severity}  ${entry.path}  ${entry.file}`),
       "recent failed commands (transcript, tool call):",
       ...recentFailures.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${entry.command}  ${entry.file}  ${entry.id}`),
+      ...(gate ? [`sessions that ran ${gate} most (runs, pushes, transcript):`] : []),
+      ...busiest.map((session) => `  ${session.last.slice(0, 16)}  ${session.runs}  ${session.pushes}  ${session.file}`),
+      "slowest checks (transcript, tool call):",
+      ...slowest.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${Math.round(entry.seconds)} s  ${entry.outcome}  ${entry.file}  ${entry.id}`),
     ]);
   }
   const repos = repoReport(usage);
   return emit({ since: from.toISOString(), repos }, () => [
     `since ${day(from.toISOString())}: ${repos.length} repositories`,
-    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "last"], repos.map((stats) => [
+    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "last"], repos.map((stats) => [
       stats.repo, String(stats.sessions), String(stats.prompts), percent(stats.correctionRate), String(stats.interrupts),
-      String(stats.blockers), String(stats.shoulds), String(stats.failures), day(stats.lastActive),
+      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), day(stats.lastActive),
     ])),
   ]);
 }

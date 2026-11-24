@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { areaReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
+import { areaReport, busiestSessions, checkOf, checkReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
 
 const roots: string[] = [];
 after(async () => {
@@ -38,6 +38,19 @@ const bash = (id: string, command: string) => ({ type: "tool_use", id, name: "Ba
 
 function toolResult(timestamp: string, toolUseId: string, isError: boolean, content = "Exit code 1") {
   return { ...base, type: "user", timestamp, uuid: uuid(), toolUseResult: {}, message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, is_error: isError, content }] } };
+}
+
+const bashBg = (id: string, command: string) => ({ type: "tool_use", id, name: "Bash", input: { command, run_in_background: true } });
+
+const noticeText = (toolUseId: string, exitCode: number, status = "completed") =>
+  `<task-notification>\n<task-id>x</task-id>\n<tool-use-id>${toolUseId}</tool-use-id>\n<status>${status}</status>\n<summary>Background command "run until exit code 0" completed (exit code ${exitCode})</summary>\n</task-notification>`;
+
+/** The three records Claude Code writes for a completion notice. */
+function notice(timestamp: string, toolUseId: string, exitCode: number, form: "user" | "queue" | "attachment" = "user", status = "completed") {
+  const text = noticeText(toolUseId, exitCode, status);
+  if (form === "queue") return { type: "queue-operation", operation: "enqueue", timestamp, sessionId: "s1", content: text };
+  if (form === "attachment") return { ...base, type: "attachment", timestamp, uuid: uuid(), attachment: { type: "queued_command", prompt: text, commandMode: "task-notification" } };
+  return { ...base, type: "user", timestamp, uuid: uuid(), message: { role: "user", content: text } };
 }
 
 const jsonl = (lines: object[]): string => lines.map((line) => JSON.stringify(line)).join("\n");
@@ -167,6 +180,93 @@ test("failed commands keep their kind and structure, never their arguments", () 
   assert.deepEqual(failures.map((failure) => [failure.kind, failure.command]), [["probe", "grep"], ["exit", "pnpm test"]]);
   assert.ok(!JSON.stringify(failures).includes("secret-token"));
   assert.deepEqual(failureReport(failures).map((stats) => [stats.kind, stats.count]), [["probe", 1], ["exit", 1]]);
+});
+
+test("verification commands are classified by the step that runs them", () => {
+  const kind = (command: string) => checkOf(command)?.kind;
+  assert.equal(kind("cd apps/web && pnpm --filter test-kit build"), "build", "a flag value is a target, not the check");
+  assert.equal(kind("pnpm lint && pnpm --filter web test"), "test", "the broadest check of the command wins");
+  assert.equal(kind("set -o pipefail; node tooling/ci/preflight.mjs | tail"), "preflight");
+  assert.equal(kind("npx playwright test --project chromium"), "e2e");
+  assert.equal(kind("node --test scripts/x.test.mts"), "test");
+  assert.equal(kind("timeout 600 pnpm test"), "test");
+  assert.equal(kind("env CI=1 pnpm lint"), "lint");
+  assert.equal(kind("git add -A && git commit -m x && git push -u origin feat"), "push");
+  assert.deepEqual(checkOf("pnpm preflight && git push"), { kind: "preflight", masked: false, pushes: true }, "the gate right before the push still counts the push");
+  assert.equal(kind("gh pr checks 12 --watch"), "ci-wait");
+  assert.equal(kind("node ~/.agents/build/claude/scripts/pr-state.mts 12 dir --wait"), "ci-wait");
+  for (const command of [
+    "gh pr checks 12",
+    "grep -rn test src && cat README.md",
+    "git log -- test/",
+    "cat <<'EOF'\npnpm test\nEOF",
+    "node ~/.agents/build/claude/scripts/usage.mts repos",
+    "node ~/.agents/build/claude/scripts/pr-state.mts 12 dir",
+    "pnpm add -D eslint",
+    "npm i -D @playwright/test",
+    "pnpm why vitest",
+    "npx playwright install chromium",
+    "uv pip install pytest",
+  ]) assert.equal(kind(command), undefined, command);
+});
+
+test("a check whose exit code the command hides has an unknown outcome", () => {
+  const masked = (command: string) => checkOf(command)?.masked;
+  assert.equal(masked("pnpm preflight 2>&1 | tail -20"), true);
+  assert.equal(masked("pnpm test |& tee out.log"), true);
+  assert.equal(masked("pnpm test || true"), true);
+  assert.equal(masked("pnpm test && echo PASS || echo FAIL"), true);
+  assert.equal(masked("pnpm test; echo $?"), true, "a trivial command after it still sets the exit code");
+  assert.equal(masked("pnpm test\ngit status"), true);
+  assert.equal(masked("pnpm test && git push"), false, "the push is the broadest check and runs last");
+  assert.equal(masked("pnpm lint && pnpm test"), false);
+  assert.equal(masked("set -euo pipefail; pnpm test | tail"), false);
+  assert.equal(masked("set +o pipefail; pnpm test | tail"), true);
+  assert.equal(masked("set -e\npnpm test\ngit status"), false);
+  assert.equal(masked("cat <<'EOF'\nset -o pipefail\nEOF\npnpm test | tail"), true, "pipefail in a heredoc does not count");
+});
+
+test("check time runs to the result, or to the completion notice in the background", () => {
+  const { checks } = parseTranscript("/t/s1.jsonl", jsonl([
+    assistant("m1", "2026-11-01T10:00:00.000Z", 1, [bash("t1", "pnpm --filter web test")]),
+    toolResult("2026-11-01T10:00:30.000Z", "t1", false, "ok"),
+    assistant("m2", "2026-11-01T10:01:00.000Z", 1, [bash("p1", "pnpm preflight 2>&1 | tail -5")]),
+    toolResult("2026-11-01T10:03:00.000Z", "p1", false, "ok"),
+    assistant("m3", "2026-11-01T10:04:00.000Z", 1, [bashBg("p2", "pnpm preflight")]),
+    toolResult("2026-11-01T10:04:01.000Z", "p2", false, "Command running in background with ID: x"),
+    assistant("m4", "2026-11-01T10:05:00.000Z", 1, [bash("p3", "git push")]),
+    toolResult("2026-11-01T10:07:00.000Z", "p3", false, "Command did not complete within its 120s timeout and was moved to the background (ID: y). Its output is being written to /tmp/y.output."),
+    // The queue entry carries the real end; the later copies of the same notice are ignored.
+    notice("2026-11-01T10:14:00.000Z", "p2", 1, "queue"),
+    notice("2026-11-01T10:14:30.000Z", "p2", 1, "user"),
+    notice("2026-11-01T10:15:00.000Z", "p3", 0, "attachment"),
+    assistant("m5", "2026-11-01T10:16:00.000Z", 1, [bashBg("p4", "pnpm preflight")]),
+    assistant("m6", "2026-11-01T10:17:00.000Z", 1, [bashBg("p5", "pnpm preflight")]),
+    notice("2026-11-01T22:17:00.000Z", "p5", 0),
+    // A superseded run, a denied call and a tool result that prints a notice are not check results.
+    assistant("m7", "2026-11-01T22:20:00.000Z", 1, [bashBg("p6", "pnpm preflight")]),
+    notice("2026-11-01T22:21:00.000Z", "p6", 143, "queue", "killed"),
+    assistant("m8", "2026-11-01T22:22:00.000Z", 1, [bash("p7", "pnpm test")]),
+    toolResult("2026-11-01T22:23:00.000Z", "p7", true, "Permission for this command was denied"),
+    assistant("m9", "2026-11-01T22:24:00.000Z", 1, [bashBg("p8", "pnpm lint"), bash("c1", "cat log")]),
+    toolResult("2026-11-01T22:24:05.000Z", "c1", false, noticeText("p8", 0)),
+    assistant("m10", "2026-11-01T22:25:00.000Z", 1, [bash("p9", "pnpm test")]),
+    toolResult("2026-11-01T22:25:10.000Z", "p9", true, "Exit code 1\nError: ENOENT: no such file or directory"),
+    assistant("m11", "2026-11-01T22:26:00.000Z", 1, [bash("p10", "pnpm preflight && git push")]),
+    toolResult("2026-11-01T22:36:00.000Z", "p10", false, "ok"),
+  ]));
+  assert.deepEqual(checks.map((check) => [check.kind, check.seconds, check.background, check.outcome]), [
+    ["test", 30, false, "ok"],
+    ["preflight", 120, false, "unknown"],
+    ["preflight", 600, true, "fail"],
+    ["push", 600, true, "ok"],
+    ["preflight", 43200, true, "ok"],
+    ["test", 10, false, "unknown"],
+    ["preflight", 600, false, "ok"],
+  ], "a background run without a notice yet is left out; a missing file may be another step's failure");
+  assert.deepEqual(busiestSessions(checks, "preflight").map((session) => [session.runs, session.pushes]), [[4, 2]]);
+  const [preflight] = checkReport(checks);
+  assert.deepEqual(preflight && [preflight.kind, preflight.runs, preflight.background, preflight.late, preflight.medianSeconds, Math.round(preflight.totalHours * 100) / 100, preflight.medianPerSession], ["preflight", 4, 2, 1, 600, 0.37, 4], "a notice delivered on resume is late and stays out of the times");
 });
 
 test("ingest keeps entries of deleted transcripts, drops fork copies and re-reads only changed files", async () => {

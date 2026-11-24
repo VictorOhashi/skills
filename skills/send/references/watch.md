@@ -67,7 +67,7 @@ O `--wait` termina quando nada mais esta pendente, quando surge acao ou feedback
 
    **Atencao:** antes de publicar, releia o head remoto. Se outro autor ou processo o mudou, nao sobrescreva: pare e escale.
 
-   Para cada correcao ou integracao da base, siga Comprovar, Revisar e Enviar de `send` sobre o delta. Agrupe num unico push as correcoes de uma mesma leitura de comentarios. Apos o push, leia o novo head e revalide CI e reviews, sem descartar comentarios antigos automaticamente.
+   Para cada correcao ou integracao da base, siga Comprovar, Revisar e Enviar de `send` sobre o delta. Se um check esperado ainda estiver pendente no head, corrija localmente e espere-o com o observador, dentro de Esperas e limites, antes do push: o push relanca o CI no novo head, e o resultado pendente deixa de valer para o PR. No timeout do observador, ou se o pendente for bot sem check, publique. Agrupe num unico push as correcoes de CI e de comentarios de uma mesma leitura. Apos o push, leia o novo head e revalide CI e reviews, sem descartar comentarios antigos automaticamente.
 7. **Descricao.** Se uma correcao mudar a descricao, atualize-a com `pr-format`.
 
 ## Esperas e limites
