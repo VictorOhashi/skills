@@ -174,6 +174,7 @@ test("reviewer findings keep severity and repository path, once per finding line
 });
 
 test("failed commands keep their kind and structure, never their arguments", () => {
+  assert.deepEqual(["File does not exist.", "<tool_use_error>File does not exist.</tool_use_error>"].map(failureKind), ["missing-path", "missing-path"]);
   assert.equal(failureKind("Exit code 127\nzsh: command not found: pnpmx"), "not-found");
   assert.equal(failureKind("Exit code 1\ncat: x.md: No such file or directory"), "missing-path");
   assert.equal(failureKind("<tool_use_error>Blocked: sleep 60 followed by: gh pr checks"), "blocked");

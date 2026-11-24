@@ -14,7 +14,7 @@ Transforme o uso real das skills em mudancas pequenas e comprovadas no catalogo.
 
 O checkout do catalogo e o submodulo `skills/` do checkout de perfis registrado em `~/.agents/state.json` (campo `repoRoot`). Altere as skills e os casos de eval nele.
 
-- **Uso das skills:** `node {{SCRIPTS_DIR}}/usage.mts skills [--since 30d] [--until <data>] [--json]`. Mede cada skill pelo turno em que carregou. Execucoes com o nome antigo de uma skill renomeada contam no nome atual. Com `--skill <nome>`, mostra por versao, e na linha `all` para todas, os sinais do turno e, a partir da carga da versao, `checks`, `unknown` (media das sessoes) e `gate rep`. Tambem lista as execucoes recentes com transcript e registro da carga.
+- **Uso das skills:** `node {{SCRIPTS_DIR}}/usage.mts skills [--since 30d] [--until <data>] [--json]`. Mede cada skill pelo turno em que carregou. Execucoes com o nome antigo de uma skill renomeada contam no nome atual. Com `--skill <nome>`, mostra por versao, e na linha `all` para todas, os sinais do turno e, a partir da carga da versao, `checks`, `unknown` (media das sessoes) e `gate rep`. Tambem lista as execucoes recentes, com os argumentos de `turn`.
 - **Turno da carga:** `node {{SCRIPTS_DIR}}/usage.mts turn <transcript> <registro>`. Mostra o prompt e o turno a partir da carga, com texto truncado.
 - **Sinais por repositorio:** `node {{SCRIPTS_DIR}}/usage.mts repos [--repo <nome>]`. `unknown` e a parte das verificacoes que esconde o codigo de saida. `gate rep` e a parte das sessoes com push que rodaram o gate local mais vezes do que fizeram push.
 - **Eval de acionamento:** `node scripts/trigger-eval.mts [--skill <nome>] [--baseline <run salvo>]`, na raiz do checkout do catalogo. Roda os casos de `evals/triggers.json` contra a arvore de trabalho. A execucao completa e salva. Caso que falha ou muda em relacao a linha de base roda mais duas vezes e passa por maioria. `--skill` inclui os prompts vizinhos que nao devem carregar a skill.
@@ -25,14 +25,14 @@ O checkout do catalogo e o submodulo `skills/` do checkout de perfis registrado 
 
   `decisao` e `aceita`, `descartada` ou `fora da skill`; `acompanhamento` e `melhorou`, `igual`, `piorou`, `a confirmar` ou vazio.
 
-**Nota:** a correcao e detectada por heuristica sobre o texto da proxima mensagem. Numa amostra rotulada, acertou 90% das que marcou (IC 95%: 71 a 97%) e achou 56% das correcoes reais (IC 95%: 39 a 71%). Confirme cada caso no turno e nao a leia como taxa absoluta.
+**Nota:** a correcao e detectada por heuristica sobre o texto da proxima mensagem. Numa amostra rotulada, acertou 90% das que marcou (IC 95%: 71 a 97%) e achou 56% das correcoes reais (IC 95%: 39 a 71%). Confirme cada caso no turno.
 
 **Nota:** os relatorios e o eval leem so o Claude Code. Skill usada so no Codex aparece como sem uso.
 
 ## Procedimento
 
 1. **Linha de base.** Rode os dois relatorios dos ultimos 30 dias e o eval completo. Guarde o caminho do run salvo do eval.
-2. **Acompanhamento.** Para cada linha `aceita` do registro com acompanhamento vazio ou `a confirmar`, rode `--skill` da skill alterada, ou da skill dona da regra, em duas janelas: `--since <data - 30 dias> --until <data>` e `--since <data>`. `<data>` e o `first` da primeira versao depois da `versao anterior` do registro. Compare a linha `all` das duas janelas. Com pelo menos 10 execucoes fora de `stale` em cada janela, anote:
+2. **Acompanhamento.** Para cada linha `aceita` do registro com acompanhamento vazio ou `a confirmar`, rode `--skill` da skill alterada, ou da skill dona da regra, em duas janelas: `--since <data - 30 dias> --until <data>` e `--since <data>`. `<data>` e o `first` da primeira versao depois da `versao anterior` do registro, lido com `--since` anterior a data do registro. Compare a linha `all` das duas janelas. Com pelo menos 10 execucoes fora de `stale` em cada janela, anote:
    - `melhorou` ou `piorou`: a taxa do sinal esperado mudou pelo menos 5 pontos (correcao, interrupcao, erro de ferramenta) ou 10 pontos (`unknown`, `gate rep`), e a janela com a taxa maior tem pelo menos 3 ocorrencias confirmadas no transcript;
    - `a confirmar` quando a mediana de `turn out` subiu mais de 20%, com pelo menos 30 execucoes em cada janela. A proxima retro troca por `piorou` se a alta continuar, ou por `igual`;
    - `igual` nos demais casos.

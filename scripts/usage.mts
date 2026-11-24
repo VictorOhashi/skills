@@ -102,13 +102,13 @@ export type Usage = {
 
 type Store = Usage & {
   /** Bumped when parsing changes, so the next ingest re-reads every transcript still on disk. */
-  version: 12;
+  version: 13;
   /** Transcript path -> mtime already ingested. */
   files: Record<string, number>;
 };
 
 /** Bump when a classification changes: transcripts still on disk are read again; entries of deleted ones are kept as `stale`. */
-const STORE_VERSION = 12;
+const STORE_VERSION = 13;
 const SKILL_HEADER = "Base directory for this skill: ";
 const INTERRUPT = "[Request interrupted by user";
 const WORKTREE = /\/\.(claude|codex)\/worktrees\/[^/]+/;
@@ -375,7 +375,7 @@ export function failureKind(output: string): FailureKind {
   if (output.startsWith("The user doesn't want to proceed")) return "rejected";
   if (output.startsWith("[Tool call interrupted")) return "interrupted";
   if (/command not found|: not found\b/.test(output)) return "not-found";
-  if (/No such file or directory|ENOENT|^File does not exist/.test(output)) return "missing-path";
+  if (/No such file or directory|ENOENT|^(?:<tool_use_error>)?File does not exist/.test(output)) return "missing-path";
   if (/^Command timed out|timed out after/i.test(output)) return "timeout";
   return "exit";
 }
@@ -880,7 +880,7 @@ export function failureReport(failures: CommandFailure[]): FailureStats[] {
     .sort((a, b) => b.sessions - a.sessions || b.count - a.count);
 }
 
-export type SessionChecks = { file: string; kind: CheckKind; runs: number; pushes: number; last: string };
+export type SessionChecks = { file: string; kind: CheckKind; runs: number; pushes: number; last: string; stale: boolean };
 
 /** Sessions that ran `kind` most, with their pushes: more runs than pushes means the gate ran again before publishing. */
 export function busiestSessions(checks: CheckRun[], kind: CheckKind, limit = 10): SessionChecks[] {
@@ -891,6 +891,7 @@ export function busiestSessions(checks: CheckRun[], kind: CheckKind, limit = 10)
       runs: group.filter((entry) => entry.kind === kind).length,
       pushes: group.filter((entry) => entry.kind === "push" || entry.pushes).length,
       last: group.at(-1)?.at ?? "",
+      stale: group.some((entry) => entry.stale),
     }))
     .filter((session) => session.runs > 0)
     .sort((a, b) => b.runs - b.pushes - (a.runs - a.pushes) || b.runs - a.runs)
@@ -1128,9 +1129,9 @@ export async function main(argv: string[], print: (line: string) => void = conso
       "recent failed commands (transcript, tool call):",
       ...recentFailures.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${entry.command}  ${entry.file}  ${entry.id}${mark(entry)}`),
       ...(gate ? [`sessions that ran ${gate} most (runs, pushes, transcript):`] : []),
-      ...busiest.map((session) => `  ${session.last.slice(0, 16)}  ${session.runs}  ${session.pushes}  ${session.file}`),
+      ...busiest.map((session) => `  ${session.last.slice(0, 16)}  ${session.runs}  ${session.pushes}  ${session.file}${session.stale ? "  stale" : ""}`),
       "slowest checks (transcript, tool call):",
-      ...slowest.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${Math.round(entry.seconds)} s  ${entry.outcome}  ${entry.file}  ${entry.id}`),
+      ...slowest.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${Math.round(entry.seconds)} s  ${entry.outcome}  ${entry.file}  ${entry.id}${mark(entry)}`),
     ]);
   }
   const repos = repoReport(usage);
