@@ -683,7 +683,8 @@ export type VersionStats = Omit<SkillStats, "skill" | "inCatalog" | "versions"> 
   version: string;
   firstUsed: string;
   checks: number;
-  unknownRate: number;
+  /** Mean over sessions with checks other than pushes and CI waits, stale ones left out; undefined without any. */
+  unknownRate: number | undefined;
   repeatedGate: number | undefined;
 };
 
@@ -753,11 +754,12 @@ export function versionReport(runs: SkillRun[], skill: string, checks: CheckRun[
   return [...groupBy(runs.filter((run) => run.skill === skill), (run) => run.version)]
     .map(([version, group]) => {
       const own = checksAfterLoad(runs.filter((run) => run.skill === skill), version, checks);
-      const bySession = [...groupBy(own, (entry) => entry.sessionId).values()].map(unknownRate);
+      const eligible = own.filter((entry) => entry.kind !== "push" && entry.kind !== "ci-wait" && !entry.stale);
+      const bySession = [...groupBy(eligible, (entry) => entry.sessionId).values()].map(unknownRate);
       return {
         version, ...runMetrics(group), firstUsed: group[0]?.at ?? "", checks: own.length,
         // Mean of the session rates, so one long session does not decide the version.
-        unknownRate: bySession.length === 0 ? 0 : sum(bySession) / bySession.length,
+        unknownRate: bySession.length === 0 ? undefined : sum(bySession) / bySession.length,
         repeatedGate: repeatedGateRate(own),
       };
     })
@@ -1062,7 +1064,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
           stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(stats.staleRuns), String(Math.round(stats.medianSeconds)),
           String(Math.round(stats.medianOutputTokens)), fresh(stats.toolErrorRate, stats.runs, stats.staleRuns), percent(stats.interruptRate),
           fresh(stats.correctionRate, stats.runs, stats.staleRuns),
-          String(stats.checks), percent(stats.unknownRate), optionalPercent(stats.repeatedGate),
+          String(stats.checks), optionalPercent(stats.unknownRate), optionalPercent(stats.repeatedGate),
         ])),
       "stale: runs from deleted transcripts, left out of tool err and correct; checks, unknown and gate rep: checks from the version's load until another version loads; unknown is the mean of the session rates",
       "recent runs (repo, reaction, transcript, record of the load):",

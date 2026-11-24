@@ -396,6 +396,10 @@ test("reports compare skill versions and rank repositories", async () => {
   const bySession = runs.map((run) => ({ ...run, sessionId: run.file }));
   const before = { ...check("/t/b.jsonl", "unknown"), at: "2026-11-05T09:00:00.000Z" };
   assert.deepEqual(versionReport(bySession, "send", [check("/t/a.jsonl", "ok"), before, check("/t/b.jsonl", "unknown"), check("/t/b.jsonl", "unknown"), check("other", "unknown")]).map((stats) => [stats.checks, stats.unknownRate]), [[1, 0], [2, 1]], "checks count from the load on, in the sessions where each version loaded");
+  const push = { ...check("/t/b.jsonl", "ok"), kind: "push" as const, sessionId: "/t/b.jsonl" };
+  const staleCheck = { ...check("/t/b.jsonl", "ok"), sessionId: "gone", stale: true as const };
+  const runsB = [...bySession, { ...bySession[1]!, sessionId: "gone", stale: true as const }, { ...bySession[1]!, sessionId: "push-only" }];
+  assert.deepEqual(versionReport(runsB, "send", [check("/t/b.jsonl", "unknown"), staleCheck, { ...push, sessionId: "push-only" }]).map((stats) => stats.unknownRate), [undefined, 1], "sessions without an eligible, current check stay out of the mean");
 
   const usage = parseTranscript("/t/d.jsonl", jsonl([
     human("faz o fix", "2026-11-05T10:00:00.000Z"),
