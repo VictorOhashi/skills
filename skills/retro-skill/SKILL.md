@@ -1,5 +1,5 @@
 ---
-name: skill-retro
+name: retro-skill
 description: Revisa as skills do catalogo pelo uso real e propoe mudancas comprovadas pelo eval de acionamento. Use somente quando o usuario pedir uma retro das skills ou quando uma tarefa agendada a disparar.
 disable-model-invocation: true
 ---
