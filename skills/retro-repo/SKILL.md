@@ -11,7 +11,7 @@ Altere o repositorio para que o proximo agente consiga seguir o caminho correto 
 
 ## Identificar a recorrencia
 
-Parta das correcoes do usuario, commits, reversoes, pareceres de revisao e instrucoes locais. Para achar candidatos nas sessoes de agente, rode `node {{SCRIPTS_DIR}}/usage.mts repos --repo <nome da pasta do checkout principal> [--since 30d] [--json]`. Ele lista as areas com mais achados `blocker` e `should` de revisores, os comandos que mais falham por tipo e as correcoes do usuario, cada uma com o transcript de origem. Leia o transcript de cada ocorrencia antes de conta-la. Agrupe ocorrencias pela decisao que permitiu o erro. Uma correcao explicita do usuario basta para investigar a classe. Para inferir recorrencia pelo historico, confirme duas ocorrencias distintas. Priorize as classes mais frequentes dentro do escopo pedido.
+Parta das correcoes do usuario, commits, reversoes, pareceres de revisao e instrucoes locais. Para achar candidatos nas sessoes de agente, rode `node {{SCRIPTS_DIR}}/usage.mts repos --repo <nome da pasta do checkout principal> [--since 30d] [--json]`. Ele lista as areas com mais achados `blocker` e `should` de revisores, os comandos que mais falham por tipo e as correcoes do usuario, cada uma com o transcript de origem. Leia o transcript de cada ocorrencia antes de conta-la. O mesmo relatorio mede o tempo de lint, testes, gate local, push e espera de CI. Gate rodado mais de uma vez por publicacao, contra a regra de `verification`, e candidato: a classe e a decisao que levou a repeticao. Leia as sessoes que ele lista com mais execucoes do gate do que pushes. Agrupe ocorrencias pela decisao que permitiu o erro. Uma correcao explicita do usuario basta para investigar a classe. Para inferir recorrencia pelo historico, confirme duas ocorrencias distintas. Priorize as classes mais frequentes dentro do escopo pedido.
 
 **Nota:** o relatorio aponta onde procurar, nao a classe. Area com muitos achados pode ser so area muito alterada, e falha de comando pode ser do ambiente.
 
@@ -27,7 +27,7 @@ Percorra os niveis em ordem e use o primeiro que resolva a classe de erro:
 
 ## Corrigir e comprovar
 
-Corrija as ocorrencias confirmadas no escopo autorizado. Para uma protecao executavel, reintroduza uma ocorrencia historica em uma copia temporaria. Execute o comando usado pelo projeto e confira que ele rejeita o erro pelo motivo esperado. Repita com a correcao e com um uso legitimo proximo. Use o mesmo comando localmente e na integracao continua quando ela ja rodar esse comando; inclui-lo na CI exige autorizacao explicita. Para uma instrucao local, confira se o criterio distingue a ocorrencia historica do uso legitimo e relate a dependencia de julgamento.
+Corrija as ocorrencias confirmadas no escopo autorizado. Para uma protecao executavel, reintroduza uma ocorrencia historica em uma copia temporaria. Execute o comando usado pelo projeto e confira que ele rejeita o erro pelo motivo esperado. Repita com a correcao e com um uso legitimo proximo. Meca o tempo do comando antes e depois e relate o custo da protecao. Use o mesmo comando localmente e na integracao continua quando ela ja rodar esse comando; inclui-lo na CI exige autorizacao explicita. Para uma instrucao local, confira se o criterio distingue a ocorrencia historica do uso legitimo e relate a dependencia de julgamento.
 
 Registre excecoes junto ao uso autorizado, com motivo, prazo e responsavel pela aprovacao.
 

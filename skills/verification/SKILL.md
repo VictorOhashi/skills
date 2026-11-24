@@ -19,6 +19,7 @@ Comprove o comportamento atual com evidencia proporcional ao risco e declare o q
 - Escolha as verificacoes pelo comportamento e pelo risco. Siga os comandos e criterios de teste do repositorio.
 - Se uma verificacao nao puder rodar, relate a limitacao e o risco residual.
 - Se o repositorio tiver gate local, rode-o uma vez por publicacao: depois da revisao e do commit, imediatamente antes do push.
+- Se filtrar a saida de gate, testes, lint ou typecheck com pipe, use `set -o pipefail`. Nao encadeie outro comando depois deles com `;` ou `|| true`. Assim o codigo de saida e o do comando.
 - Enquanto a revisao corrige achados, rode so lint, typecheck e os testes do que mudou.
 - Se o gate falhar numa etapa, rode so o comando dessa etapa ate passar. Se a etapa for de testes, rode so os testes que falharam.
 - Se a correcao mudar codigo alem de formatacao ou baseline, submeta o delta a nova revisao.
