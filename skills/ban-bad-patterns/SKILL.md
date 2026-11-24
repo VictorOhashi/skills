@@ -1,5 +1,5 @@
 ---
-name: ban-bad-pattern
+name: ban-bad-patterns
 description: Aponta e corrige desvios de convencao local, uso de ferramenta e padrao de desenho em um diff ou area indicada, por um revisor critico independente. Use quando o pedido for investigar desvios de arquitetura, abstracoes que dificultam o uso, ferramentas aplicadas fora do contrato ou convencoes que custam mais do que entregam.
 ---
 

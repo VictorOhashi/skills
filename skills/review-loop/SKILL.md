@@ -1,9 +1,9 @@
 ---
-name: validation-loop
+name: review-loop
 description: Revisao final de uma entrega com revisor independente, em ate 3 rodadas, e passada de seguranca quando a mudanca pede. Roda em todo PR, antes do push final de trabalho que nao vira PR e quando solicitado.
 ---
 
-# Validacao em loop
+# Revisao em loop
 
 Ultimo refinamento antes de publicar: um revisor independente procura bug, regressao e complexidade desnecessaria no diff, e voce corrige com a menor mudanca completa. Em pedido somente de revisao, relate os achados sem editar.
 

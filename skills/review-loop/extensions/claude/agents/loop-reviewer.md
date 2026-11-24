@@ -1,6 +1,6 @@
 ---
-name: validation-reviewer
-description: Revisor somente leitura da validation-loop, acionado pela conversa principal com briefing da rodada.
+name: loop-reviewer
+description: Revisor somente leitura da review-loop, acionado pela conversa principal com briefing da rodada.
 model: opus
 effort: high
 tools: Read, Grep, Glob, Bash

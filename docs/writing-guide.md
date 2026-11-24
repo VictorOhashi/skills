@@ -48,7 +48,7 @@ Donos dos estados e das permissoes deste repositorio, pela secao Estados e permi
 | --- | --- | --- |
 | **Corrigir localmente**, **Publicar** | `send` | Permissoes concedidas pelo modo do perfil ou por autorizacao explicita. |
 | **Pronto para merge**, **Aguardando**, **Bloqueado ou limite atingido**, **Fechado ou mergeado** | `send` | Saida do PR. |
-| **Aprovado**, **Escalado** | `validation-loop` | Saida da revisao. |
+| **Aprovado**, **Escalado** | `review-loop` | Saida da revisao. |
 | feito, em andamento, aguardando, bloqueado, pendente | `visual-plan` | Status do quadro; mapeia os estados acima. |
 
 ## Citacao entre skills

@@ -1,5 +1,5 @@
 ---
-name: mockup
+name: ui-mockup
 description: Cria mockups de interface fieis ao app e ao design system do projeto para decidir mudancas de UI antes de implementar. Use em pedidos de mockup, wireframe, antes/depois, para comparar opcoes visuais ou antes de mudanca visual nao trivial.
 ---
 
@@ -20,7 +20,7 @@ Apresentar um mockup nao muda as permissoes da tarefa: analise continua sem edic
 
 ## 2. Construcao
 
-- Siga as definicoes de design do projeto: componentes, tokens e padroes do design system vigente, textos da localizacao e dados no formato do contrato ou das fixtures. Sem design system, siga a Precedencia e o passo Desenhar de `principle-ui-design`.
+- Siga as definicoes de design do projeto: componentes, tokens e padroes do design system vigente, textos da localizacao e dados no formato do contrato ou das fixtures. Sem design system, siga a Precedencia e o passo Desenhar de `ui-principles`.
 - Elemento que nao existe no design system aparece marcado como proposta de componente novo, nunca como estilo solto.
 - Nada inventado: texto, metrica, selo, aviso ou elemento sem fonte no app, no contrato ou no pedido leva o selo visivel "hipotetico". Nao desenhe barra, botao ou estado que nao existe no app como se existisse.
 - Cubra os estados, tamanhos, fluxos e telas irmas afetados, sem repetir quadros identicos. Considere vazio, carregando, erro, sucesso e texto longo quando aplicaveis; no web, celular (390) e desktop (1440) sao referencias, ajustadas ao projeto; em app nativo, use os tamanhos da plataforma alvo.

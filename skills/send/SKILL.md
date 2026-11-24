@@ -1,6 +1,6 @@
 ---
 name: send
-description: 'Entrega uma tarefa ate o PR pronto para merge, com verificacao, revisao independente (validation-loop), publicacao e acompanhamento de CI e reviews. Use em todo PR de tarefa: ao abrir, ao publicar mudanca de codigo ou ao acompanhar CI e reviews.'
+description: 'Entrega uma tarefa ate o PR pronto para merge, com verificacao, revisao independente (review-loop), publicacao e acompanhamento de CI e reviews. Use em todo PR de tarefa: ao abrir, ao publicar mudanca de codigo ou ao acompanhar CI e reviews.'
 ---
 
 # Send
@@ -32,7 +32,7 @@ Em pedido de acompanhamento, entre em Acompanhar quando a verificacao e a revisa
 
 1. **Delimitar.** Leia as instrucoes locais, o estado do Git e o diff, incluindo arquivos novos. Confirme checkout, branch, repositorio, remote de push e base. Trabalhe em branch propria, nunca na base. Preserve trabalho preexistente e commits alheios; nao os publique sem autorizacao explicita. Conclua a menor mudanca completa, sem ampliar o escopo.
 2. **Comprovar.** Reaproveite a evidencia de `verification` que cobre o conteudo atual. Execute as verificacoes focadas que faltarem. Se faltar evidencia essencial, pare a publicacao e relate a lacuna.
-3. **Revisar.** Rode `validation-loop` sobre o diff da tarefa.
+3. **Revisar.** Rode `review-loop` sobre o diff da tarefa.
    - Com **Aprovado**, siga para Enviar.
    - Com blocker ou should de seguranca aberto e PR ja publicado, coloque o PR em draft (draft de seguranca), apenas com **Publicar**, antes de qualquer encerramento.
    - Pedido do usuario por rascunho permite publicar em draft com revisao pendente, se nao houver blocker ou should de seguranca aberto. Esse draft sai so a pedido do usuario.
@@ -44,7 +44,7 @@ Em pedido de acompanhamento, entre em Acompanhar quando a verificacao e a revisa
 
 Classifique o resultado em um destes estados:
 
-- **Pronto para merge:** PR aberto e fora de draft; head atual verificado; `validation-loop` **Aprovado** sobre o comportamento do head atual; checks exigidos satisfeitos; bots de review esperados pelo repositorio concluiram a analise; achados relevantes de reviews e bots corrigidos ou contestados com evidencia; sem conflitos; aprovacoes exigidas satisfeitas, sem mudancas solicitadas; threads exigidas resolvidas; nenhum bloqueio reportado pela plataforma; condicoes extras do perfil satisfeitas. Se alguma regra nao puder ser confirmada, nao afirme prontidao.
+- **Pronto para merge:** PR aberto e fora de draft; head atual verificado; `review-loop` **Aprovado** sobre o comportamento do head atual; checks exigidos satisfeitos; bots de review esperados pelo repositorio concluiram a analise; achados relevantes de reviews e bots corrigidos ou contestados com evidencia; sem conflitos; aprovacoes exigidas satisfeitas, sem mudancas solicitadas; threads exigidas resolvidas; nenhum bloqueio reportado pela plataforma; condicoes extras do perfil satisfeitas. Se alguma regra nao puder ser confirmada, nao afirme prontidao.
 
   **Nota:** a plataforma dizer que o PR e mergeavel nao comprova esses requisitos sozinha.
 - **Aguardando:** codigo tratado, mas falta CI, aprovacao, saida de draft, condicao extra do perfil ou outra condicao externa. Relate a condicao; se depender de acao humana, encerre.

@@ -19,19 +19,19 @@ async function catalogReviewerFiles(): Promise<string[]> {
 }
 
 test("isReviewerRole accepts only names ending in -reviewer", () => {
-  assert.ok(isReviewerRole("validation-reviewer"));
+  assert.ok(isReviewerRole("loop-reviewer"));
   assert.ok(isReviewerRole("comment-reviewer"));
   for (const name of ["pr-observer", "arena-candidate", "reviewer", "-reviewer", "../x-reviewer", "x-reviewer.toml", "X-reviewer"]) {
     assert.equal(isReviewerRole(name), false, name);
   }
 });
 
-test("reviewerEffort lets callers lower validation effort only within the allowed list", () => {
-  assert.equal(reviewerEffort("validation-reviewer", "high", undefined), "high");
-  assert.equal(reviewerEffort("validation-reviewer", "high", "high"), "high");
-  assert.equal(reviewerEffort("validation-reviewer", "high", "medium"), "medium");
-  assert.throws(() => reviewerEffort("validation-reviewer", "high", "low"), /not allowed for validation-reviewer; use high or medium/);
-  assert.throws(() => reviewerEffort("validation-reviewer", "high", "xhigh"), /not allowed/);
+test("reviewerEffort lets callers lower review effort only within the allowed list", () => {
+  assert.equal(reviewerEffort("loop-reviewer", "high", undefined), "high");
+  assert.equal(reviewerEffort("loop-reviewer", "high", "high"), "high");
+  assert.equal(reviewerEffort("loop-reviewer", "high", "medium"), "medium");
+  assert.throws(() => reviewerEffort("loop-reviewer", "high", "low"), /not allowed for loop-reviewer; use high or medium/);
+  assert.throws(() => reviewerEffort("loop-reviewer", "high", "xhigh"), /not allowed/);
   assert.throws(() => reviewerEffort("council-reviewer", "high", "medium"), /not allowed for council-reviewer; use high$/);
 });
 
@@ -50,7 +50,7 @@ test("every reviewer a Codex extension runs has its role file in the catalog", a
 
 test("parseReviewerToml reads every reviewer role file of the catalog", async () => {
   const files = await catalogReviewerFiles();
-  assert.ok(files.some((file) => file.endsWith("validation-reviewer.toml")));
+  assert.ok(files.some((file) => file.endsWith("loop-reviewer.toml")));
   for (const file of files) {
     const spec = parseReviewerToml(await readFile(file, "utf8"));
     assert.ok(spec.model && spec.effort, file);

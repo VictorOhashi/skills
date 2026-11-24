@@ -214,8 +214,8 @@ export function parseThreadPage(payload: unknown): { threads: Thread[]; cursor: 
 // --- Classification ---
 
 /**
- * Path heuristics for the high-risk list of `full-send`: a signal for the agent, not a verdict. Skills cannot
- * import each other's scripts, so `validation-loop`'s review-scope script keeps its own copy; change both
+ * Path heuristics for the high-risk list of `send-full`: a signal for the agent, not a verdict. Skills cannot
+ * import each other's scripts, so `review-loop`'s review-scope script keeps its own copy; change both
  * together. Authentication and payment also match camelCase words (`useAuth.ts`, `PaymentService.ts`).
  */
 const RISK: [string, RegExp[]][] = [
@@ -246,7 +246,7 @@ export function latestReviews(reviews: Review[]): Review[] {
   return [...byAuthor.values()];
 }
 
-/** Human approval that `full-send` accepts: APPROVED on the head SHA by a non-bot account with write access. */
+/** Human approval that `send-full` accepts: APPROVED on the head SHA by a non-bot account with write access. */
 export function humanApprovalsOnHead(pr: Pr): Review[] {
   return latestReviews(pr.reviews).filter((r) => r.state === "APPROVED" && r.commit === pr.head && !r.author.bot && r.canPush);
 }
@@ -295,7 +295,7 @@ export function assess(pr: Pr, opts: AssessOptions): Assessment {
   if (pr.reviewDecision === "REVIEW_REQUIRED") waiting.push("required approval");
   if (pr.mergeState === "BLOCKED" && !waiting.length && !actions.length) waiting.push("a merge block reported by GitHub (branch protection)");
   const unchecked = [
-    "`validation-loop` approval on this head, local verification and the profile's extra conditions.",
+    "`review-loop` approval on this head, local verification and the profile's extra conditions.",
     "Feedback in review bodies and general comments: read them below.",
     "Bot reviewers the repository expects but that report no check.",
     noChecks && !opts.noChecksPending ? "No checks were reported on this head. This is not a success." : "",
@@ -491,7 +491,7 @@ export function render(ref: Ref, pr: Pr, result: Assessment & { reason?: string 
   const riskText = risk.length
     ? risk.map((r) => `${r.area} (${r.files.slice(0, 5).map(inline).join(", ")}${r.files.length > 5 ? ", ..." : ""})`).join("; ")
     : "none matched (path heuristic)";
-  lines.push(`## Merge gate (full-send)\n\n${[
+  lines.push(`## Merge gate (send-full)\n\n${[
     `- Human approval on the head: ${approvals.length ? approvals.map((r) => r.author.login).join(", ") : "none"}`,
     `- High-risk path signals: ${riskText}${pr.filesTruncated ? " (partial: changed files were truncated)" : ""}`,
   ].join("\n")}`);

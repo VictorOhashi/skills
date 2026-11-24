@@ -20,7 +20,7 @@ Apresentar um visual nao muda as permissoes da tarefa: analise continua sem edic
 | Comparacao nao visual pedida pelo usuario (bibliotecas, servicos, abordagens) | Tabela com efeito concreto, trade-off e recomendacao. |
 | Diagnostico | Diagrama de sintoma, evidencias e causa; marque hipoteses e a verificacao que falta. |
 | Andamento e entrega | Quadro de andamento, abaixo. |
-| Mudanca visual nao trivial | Use o resultado de `mockup`. No plano, cite o link e a opcao recomendada (ou escolhida) de cada tela, sem redesenhar. |
+| Mudanca visual nao trivial | Use o resultado de `ui-mockup`. No plano, cite o link e a opcao recomendada (ou escolhida) de cada tela, sem redesenhar. |
 
 Use o menor formato que esclareca o pedido. Diagramas pequenos podem ser Mermaid no chat; tabelas funcionam sem ferramenta adicional. Use visual interativo quando a interacao ajudar a explorar. Nao gere HTML apenas para substituir uma tabela suficiente.
 
@@ -44,7 +44,7 @@ Etapas tem nomes curtos e efeito concreto para quem usa ou mantem; arquivos e si
 | **Aguardando** (`send`) | aguardando (a condicao) |
 | **Bloqueado ou limite atingido** (`send`) | bloqueado (o motivo) |
 | **Fechado ou mergeado** (`send`) | feito (mergeado) ou bloqueado (fechado sem merge) |
-| **Escalado** (`validation-loop`) | bloqueado (decisao do usuario) |
+| **Escalado** (`review-loop`) | bloqueado (decisao do usuario) |
 
 ## Apresentacao
 

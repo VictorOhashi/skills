@@ -82,8 +82,8 @@ test("compaction summaries and repeated records do not end or double a turn", ()
 
 test("slash-command loads count as user runs and interruptions are recorded", () => {
   const { runs, prompts } = parseTranscript("/t/s1.jsonl", jsonl([
-    human("<command-name>/full-send</command-name>", "2026-11-01T10:00:00.000Z"),
-    skillLoad("full-send", "# Full send", "2026-11-01T10:00:01.000Z"),
+    human("<command-name>/send-full</command-name>", "2026-11-01T10:00:00.000Z"),
+    skillLoad("send-full", "# Full send", "2026-11-01T10:00:01.000Z"),
     { ...base, type: "user", timestamp: "2026-11-01T10:00:09.000Z", uuid: uuid(), message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } },
   ]));
   assert.deepEqual([runs[0]?.trigger, runs[0]?.interrupted, runs[0]?.reaction], ["user", true, "none"]);

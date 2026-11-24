@@ -1,5 +1,5 @@
-name = "validation-reviewer"
-description = "Revisor somente leitura da validation-loop, acionado pela conversa principal com briefing da rodada."
+name = "loop-reviewer"
+description = "Revisor somente leitura da review-loop, acionado pela conversa principal com briefing da rodada."
 model = "gpt-6.2-sol"
 model_reasoning_effort = "high"
 developer_instructions = """
