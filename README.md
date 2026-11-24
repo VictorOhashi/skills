@@ -23,8 +23,8 @@ As skills nao funcionam copiando a pasta como esta. Um build junta `SKILL.md` co
 | [`retro-repo`](skills/retro-repo/SKILL.md) | Corrige a causa de erros que agentes repetem no repositorio. |
 | [`retro-skill`](skills/retro-skill/SKILL.md) | Revisa as skills pelo uso real e propoe mudancas comprovadas por eval. |
 | [`review-loop`](skills/review-loop/SKILL.md) | Revisao final com revisor independente, em ate 3 rodadas. |
-| [`send-full`](skills/send-full/SKILL.md) | Leva a tarefa ate o PR mergeado. |
 | [`send`](skills/send/SKILL.md) | Leva a tarefa ate o PR pronto para merge. |
+| [`send-full`](skills/send-full/SKILL.md) | Leva a tarefa ate o PR mergeado. |
 | [`ui-mockup`](skills/ui-mockup/SKILL.md) | Mockups fieis ao app e ao design system. |
 | [`ui-principles`](skills/ui-principles/SKILL.md) | Principios de design de interface para desenhar e revisar telas: hierarquia, estados, texto, interacao, motion. |
 | [`verification`](skills/verification/SKILL.md) | Menor verificacao suficiente antes de afirmar que funciona. |

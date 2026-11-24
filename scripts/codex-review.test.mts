@@ -26,7 +26,7 @@ test("isReviewerRole accepts only names ending in -reviewer", () => {
   }
 });
 
-test("reviewerEffort lets callers lower validation effort only within the allowed list", () => {
+test("reviewerEffort lets callers lower review effort only within the allowed list", () => {
   assert.equal(reviewerEffort("loop-reviewer", "high", undefined), "high");
   assert.equal(reviewerEffort("loop-reviewer", "high", "high"), "high");
   assert.equal(reviewerEffort("loop-reviewer", "high", "medium"), "medium");
