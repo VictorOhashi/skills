@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,17 @@ export const DEFAULT_TRANSCRIPTS = path.join(os.homedir(), ".claude", "projects"
 export const DEFAULT_STORE = path.join(os.homedir(), ".agents", "usage");
 /** Next to this script in the catalog checkout and in the installed build alike. */
 export const DEFAULT_CATALOG = path.join(path.dirname(import.meta.dirname), "skills");
+
+/** Former catalog names, so a renamed skill keeps one history. Add the old name when renaming a catalog skill. */
+export const RENAMED: Readonly<Record<string, string>> = {
+  "ban-bad-pattern": "ban-bad-patterns",
+  "design-guide": "ui-principles",
+  "full-send": "send-full",
+  "github-issue-read": "github-read",
+  mockup: "ui-mockup",
+  "principle-ui-design": "ui-principles",
+  "validation-loop": "review-loop",
+};
 
 /** How the next human prompt after a skill turn reads: a correction, anything else, or no prompt at all. */
 export type Reaction = "correction" | "other" | "none";
@@ -85,17 +96,20 @@ export type Usage = {
 
 type Store = Usage & {
   /** Bumped when parsing changes, so the next ingest re-reads every transcript still on disk. */
-  version: 7;
+  version: 8;
   /** Transcript path -> mtime already ingested. */
   files: Record<string, number>;
 };
 
-const STORE_VERSION = 7;
+const STORE_VERSION = 8;
 const SKILL_HEADER = "Base directory for this skill: ";
 const INTERRUPT = "[Request interrupted by user";
 const WORKTREE = /\/\.(claude|codex)\/worktrees\/[^/]+/;
 // Accents are stripped before matching, so the Portuguese words carry none.
-const CORRECTION = /^(nao\b|na verdade|errad|incorret|desfaz|desfaca|revert|volta |volte |pare\b|para de|nao era|nao foi isso|wrong\b|undo\b|stop\b)|\b(esta errad|ta errad|nao e isso|nao pedi|voce errou|you broke|not what i)/;
+// On the lowercased prompt without accents. "nao", "para" and "stop" are corrections only as the first word and alone
+// or followed by a few words: "nao esquece de rodar" and "para deploy" are requests.
+const CORRECTION_START = /^(?:(?:nao|nope|no)(?:[,.!;:]|$)|nao (?:era|e isso|foi isso|e assim|e bem isso|e para|e pra|gostei|ficou|(?:tinhamos|haviamos|tinha) (?:fechado|combinado|decidido))|na verdade|errad|incorret|desfaz|desfaca|revert|volt[ae] (?:como|atras|ao que|pro que|para o que)|(?:pare|para)(?: de\b| com\b|[,.!]|$)|stop(?: doing\b|[,.!]|$)|wrong\b|undo\b|that'?s not\b)/;
+const CORRECTION_ANY = /\b(?:esta errad|ta errad|errou\b|nao e isso|nao pedi|nao funcion|nao deu certo|esqueceu\b|ta faltando|esta faltando|faltou (?:o|a|os|as)\b|de novo o mesmo|mesmo erro|continua (?:quebrad|errad|falhand|com erro|dando erro)|ainda (?:esta |ta )?(?:quebrad|errad|falhand|com erro|dando erro)|you broke|not what i|you forgot|forgot to|is wrong|that'?s wrong|didn'?t work|doesn'?t work|not working|still (?:broken|failing)|same error)/;
 const FINDING = /(?:^|\n)[ \t>*-]*R\d+ \[(blocker|should|nit|pre-existing)\] `?([^\s`]+)`?[^\n]*/g;
 const SUBCOMMANDS = new Set(["pnpm", "npm", "yarn", "bun", "npx", "git", "gh", "docker", "make", "cargo", "go", "flutter", "dart", "uv", "pip", "poetry", "kubectl", "terraform", "supabase"]);
 const READ_ONLY = new Set(["cat", "ls", "head", "tail", "grep", "rg", "find", "sed", "awk", "wc", "stat", "file", "tree", "jq", "diff", "git status", "git log", "git show", "git diff", "git rev-parse", "git branch", "git ls-files", "git grep", "git ls-remote"]);
@@ -106,7 +120,7 @@ const PROGRAM = /^[\w.@+-]+$/;
 /** Flags whose next word is their value, so it is not taken for the subcommand. */
 const VALUE_FLAGS = new Set(["--filter", "-F", "-C", "--dir", "--prefix", "--cwd", "--repo", "-R", "--workspace", "-f", "--file", "-p", "--project", "-n", "--namespace", "--context", "-c", "--git-dir", "--work-tree"]);
 /** Programs that run a project's checks; the check kind comes from their arguments. */
-const RUNNERS = new Set(["pnpm", "npm", "yarn", "bun", "bunx", "npx", "turbo", "nx", "node", "tsx", "make", "cargo", "go", "flutter", "dart", "uv", "pytest", "vitest", "jest", "playwright", "tsc", "eslint", "oxlint", "biome", "ruff", "mypy", "pyright", "gradle", "gradlew", "mvn"]);
+const RUNNERS = new Set(["bash", "sh", "python", "python3", "pnpm", "npm", "yarn", "bun", "bunx", "npx", "turbo", "nx", "node", "tsx", "make", "cargo", "go", "flutter", "dart", "uv", "pytest", "vitest", "jest", "playwright", "tsc", "eslint", "oxlint", "biome", "ruff", "mypy", "pyright", "gradle", "gradlew", "mvn"]);
 /** First match wins, so a step that names several kinds counts as the broadest one. */
 const CHECK_WORDS: Array<[CheckKind, RegExp]> = [
   ["preflight", /\bpreflight\b/],
@@ -120,7 +134,7 @@ const CHECK_WORDS: Array<[CheckKind, RegExp]> = [
 const NOT_CHECKS = new Set(["add", "install", "i", "remove", "rm", "uninstall", "why", "view", "info", "outdated", "update", "up", "link", "unlink", "pip"]);
 const NOT_RUN = new Set<FailureKind>(["blocked", "denied", "rejected", "interrupted", "outside-worktree"]);
 /** Script runners: the check is named by the script file, not by the directories in its path. */
-const SCRIPT_RUNNERS = new Set(["node", "tsx"]);
+const SCRIPT_RUNNERS = new Set(["node", "tsx", "bash", "sh", "python", "python3"]);
 /** When one command runs several checks, it counts as the one that dominates its time. */
 const CHECK_ORDER: CheckKind[] = ["preflight", "push", "e2e", "test", "typecheck", "lint", "build", "ci-wait"];
 /** Runs longer than this are left out of the times: a stuck process or a delayed completion notice. */
@@ -324,7 +338,7 @@ function humanPrompt(line: Line): string | undefined {
 
 export function isCorrection(prompt: string): boolean {
   const normalized = prompt.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim().slice(0, 300);
-  return CORRECTION.test(normalized);
+  return CORRECTION_START.test(normalized) || CORRECTION_ANY.test(normalized);
 }
 
 export function failureKind(output: string): FailureKind {
@@ -403,7 +417,7 @@ export function checkOf(command: string): { kind: CheckKind; masked: boolean; pu
     let kind: CheckKind | undefined;
     if (program === "git" && subcommand(args) === "push") kind = "push", pushes = true;
     else if ((program === "gh" && /^(pr checks|run watch)/.test(text) && (args.includes("--watch") || text.startsWith("run watch"))) || (/\bpr-state\.mts\b/.test(text) && args.includes("--wait"))) kind = "ci-wait";
-    else if (SCRIPT_RUNNERS.has(program) && args.includes("--test")) kind = "test";
+    else if ((program === "node" || program === "tsx") && args.includes("--test")) kind = "test";
     else if (NOT_CHECKS.has(subcommand(args) ?? "") || /\bplaywright (install|show-report|codegen)\b/.test(text)) kind = undefined;
     else if (RUNNERS.has(program) || /preflight/.test(program)) kind = CHECK_WORDS.find(([, pattern]) => pattern.test(`${program} ${text}`))?.[0];
     if (!kind || (found && CHECK_ORDER.indexOf(kind) >= CHECK_ORDER.indexOf(found.kind))) continue;
@@ -438,9 +452,40 @@ function findingPath(raw: string, cwd: unknown): string {
   return value;
 }
 
+const checkouts = new Map<string, string>();
+
+/** Main checkout of the folder; when the folder is gone, its name without a `.claude`/`.codex` worktree suffix. */
 function repoName(cwd: unknown): string {
   if (typeof cwd !== "string" || !cwd) return "(unknown)";
-  return path.basename(cwd.replace(new RegExp(`${WORKTREE.source}.*`), ""));
+  let name = checkouts.get(cwd);
+  if (name === undefined) {
+    name = checkoutName(cwd) ?? path.basename(cwd.replace(new RegExp(`${WORKTREE.source}.*`), ""));
+    checkouts.set(cwd, name);
+  }
+  return name;
+}
+
+/** The nearest Git checkout above `cwd`; a linked worktree's `.git` file points into the main checkout's `.git`. */
+function checkoutName(cwd: string): string | undefined {
+  for (let dir = cwd; ; dir = path.dirname(dir)) {
+    const dotGit = path.join(dir, ".git");
+    const stats = (() => {
+      try {
+        return statSync(dotGit);
+      } catch {
+        return undefined;
+      }
+    })();
+    if (stats?.isDirectory()) return path.basename(dir);
+    if (stats?.isFile()) {
+      const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1]?.trim() ?? "";
+      const target = path.resolve(dir, gitdir);
+      const worktree = /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(target)?.[1];
+      const module = /[\\/]\.git[\\/]modules[\\/](.+?)[\\/]worktrees[\\/][^\\/]+$/.exec(target)?.[1];
+      return path.basename(worktree ?? module ?? dir);
+    }
+    if (path.dirname(dir) === dir) return undefined;
+  }
 }
 
 function textOf(content: unknown): string {
@@ -588,6 +633,8 @@ export type RepoStats = {
   failures: number;
   /** Time spent in verification commands (checks, pushes, CI waits). */
   checkHours: number;
+  /** Checks other than pushes and CI waits whose command hides the exit code. */
+  unknownRate: number;
   lastActive: string;
 };
 
@@ -614,6 +661,11 @@ export type CheckStats = {
 export function since<T extends Source>(entries: T[], from: Date): T[] {
   const iso = from.toISOString();
   return entries.filter((entry) => entry.at >= iso);
+}
+
+/** Runs under the current name of a renamed catalog skill. */
+export function canonicalRuns(runs: SkillRun[]): SkillRun[] {
+  return runs.map((run) => (RENAMED[run.skill] ? { ...run, skill: RENAMED[run.skill] as string } : run));
 }
 
 export function skillReport(runs: SkillRun[], catalog: string[]): { skills: SkillStats[]; unused: string[] } {
@@ -672,6 +724,7 @@ export function repoReport(usage: Usage): RepoStats[] {
         shoulds: findings.filter((entry) => entry.severity === "should").length,
         failures: realFailures.length,
         checkHours: sum(checks.map((entry) => entry.seconds).filter((value) => value <= LATE_SECONDS)) / 3600,
+        unknownRate: rate(checks.filter((entry) => entry.kind !== "push" && entry.kind !== "ci-wait"), (entry) => entry.outcome === "unknown"),
         lastActive: all.reduce((last, entry) => (entry.at > last ? entry.at : last), ""),
       };
     })
@@ -766,6 +819,7 @@ export function table(header: string[], rows: string[][]): string[] {
 }
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
+const rate = <T,>(items: T[], hit: (item: T) => boolean): number => (items.length === 0 ? 0 : items.filter(hit).length / items.length);
 const day = (iso: string): string => iso.slice(0, 10);
 
 function median(values: number[]): number {
@@ -796,12 +850,18 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
   return groups;
 }
 
-async function catalogNames(dir: string): Promise<string[]> {
+/** Catalog skill names; `commandOnly` are the `disable-model-invocation` ones, which load only when the user asks. */
+async function catalogNames(dir: string): Promise<{ names: string[]; commandOnly: string[] }> {
   const names: string[] = [];
+  const commandOnly: string[] = [];
   for (const entry of (await readdir(dir, { withFileTypes: true }).catch(ignoreMissing)) ?? []) {
-    if (entry.isDirectory() && (await stat(path.join(dir, entry.name, "SKILL.md")).then(() => true, () => false))) names.push(entry.name);
+    if (!entry.isDirectory()) continue;
+    const text = await readFile(path.join(dir, entry.name, "SKILL.md"), "utf8").catch(ignoreMissing);
+    if (text === undefined) continue;
+    names.push(entry.name);
+    if (/^disable-model-invocation:\s*true\s*$/m.test(/^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "")) commandOnly.push(entry.name);
   }
-  return names.sort();
+  return { names: names.sort(), commandOnly: commandOnly.sort() };
 }
 
 const USAGE = `Usage:
@@ -827,7 +887,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
   if ((command !== "skills" && command !== "repos") || rest.length > 0) throw new Error(USAGE);
   const all = await ingestUsage(values.store ?? DEFAULT_STORE, values.transcripts ?? DEFAULT_TRANSCRIPTS);
   const from = parseSince(values.since);
-  const usage: Usage = { runs: since(all.runs, from), prompts: since(all.prompts, from), findings: since(all.findings, from), failures: since(all.failures, from), checks: since(all.checks, from) };
+  const usage: Usage = { runs: canonicalRuns(since(all.runs, from)), prompts: since(all.prompts, from), findings: since(all.findings, from), failures: since(all.failures, from), checks: since(all.checks, from) };
   const emit = (value: unknown, lines: () => string[]): number => {
     if (values.json) print(JSON.stringify(value, null, 2));
     else for (const line of lines()) print(line);
@@ -844,13 +904,16 @@ export async function main(argv: string[], print: (line: string) => void = conso
         stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(Math.round(stats.medianSeconds)),
         String(Math.round(stats.medianOutputTokens)), percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate),
       ])),
-      "recent runs (repo, reaction, transcript):",
-      ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}`),
+      "recent runs (repo, reaction, transcript, record of the load):",
+      ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}  ${run.id}`),
     ]);
   }
   if (command === "skills") {
-    const report = skillReport(usage.runs, await catalogNames(values.catalog ?? DEFAULT_CATALOG));
-    return emit({ since: from.toISOString(), ...report }, () => [
+    const catalog = await catalogNames(values.catalog ?? DEFAULT_CATALOG);
+    const report = skillReport(usage.runs, catalog.names);
+    const unused = report.unused.filter((name) => !catalog.commandOnly.includes(name));
+    const unusedCommands = report.unused.filter((name) => catalog.commandOnly.includes(name));
+    return emit({ since: from.toISOString(), skills: report.skills, unused, unusedCommands }, () => [
       `since ${day(from.toISOString())}: ${usage.runs.length} skill runs`,
       ...table(["skill", "runs", "user", "sess", "repos", "vers", "turn s", "turn out", "tool err", "interr", "correct", "last"], report.skills.map((stats) => [
         stats.inCatalog ? stats.skill : `${stats.skill} *`, String(stats.runs), String(stats.userRuns), String(stats.sessions), String(stats.repos),
@@ -858,7 +921,8 @@ export async function main(argv: string[], print: (line: string) => void = conso
         percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate), day(stats.lastUsed),
       ])),
       ...(report.skills.some((stats) => !stats.inCatalog) ? ["* not in the catalog: bundled, plugin or retired skill"] : []),
-      ...(report.unused.length > 0 ? [`unused catalog skills: ${report.unused.join(", ")}`] : []),
+      ...(unused.length > 0 ? [`unused catalog skills: ${unused.join(", ")}`] : []),
+      ...(unusedCommands.length > 0 ? [`unused, load only by command: ${unusedCommands.join(", ")}`] : []),
     ]);
   }
   if (values.repo) {
@@ -902,9 +966,9 @@ export async function main(argv: string[], print: (line: string) => void = conso
   const repos = repoReport(usage);
   return emit({ since: from.toISOString(), repos }, () => [
     `since ${day(from.toISOString())}: ${repos.length} repositories`,
-    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "last"], repos.map((stats) => [
+    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "unknown", "last"], repos.map((stats) => [
       stats.repo, String(stats.sessions), String(stats.prompts), percent(stats.correctionRate), String(stats.interrupts),
-      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), day(stats.lastActive),
+      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), percent(stats.unknownRate), day(stats.lastActive),
     ])),
   ]);
 }

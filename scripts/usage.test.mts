@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { areaReport, busiestSessions, checkOf, checkReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
+import { areaReport, busiestSessions, canonicalRuns, checkOf, checkReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
 
 const roots: string[] = [];
 after(async () => {
@@ -125,10 +125,21 @@ test("invocation arguments do not change the skill version", () => {
 });
 
 test("corrections are told apart from approvals and new requests", () => {
-  for (const text of ["Não, era outro arquivo", "na verdade quero o outro", "está errado", "reverte isso", "you broke the build"]) {
+  for (const text of [
+    "Não, era outro arquivo", "não.", "Nope, use the other file", "no, the other one", "na verdade quero o outro", "está errado",
+    "reverte isso", "volta como estava", "para de mexer nesse arquivo", "pare!", "you broke the build", "isso não funcionou",
+    "ainda está quebrado", "continua dando erro no CI", "esqueceu de rodar o lint", "você esqueceu o teste", "tá faltando o print",
+    "faltou o teste de borda", "de novo o mesmo erro", "não gostei como ficou", "não ficou legal essa tela",
+    "não tínhamos fechado que seria um bottom sheet?", "não é para só adicionar a label", "you forgot the tests", "that's wrong", "it still doesn't work", "stop.",
+  ]) {
     assert.equal(isCorrection(text), true, text);
   }
-  for (const text of ["pode mergear", "status?", "agora implementa o próximo", "faltou algo?"]) {
+  for (const text of [
+    "pode mergear", "status?", "agora implementa o próximo", "faltou algo?", "para deploy em staging, qual o comando?",
+    "não esquece de rodar o lint", "pare o dev server quando terminar", "volta pro main e abre outra branch", "não precisa de print",
+    "no main já tem isso?", "stop the dev server when done", "o teste ainda está passando?", "continua com o próximo item",
+    "para que serve esse script?", "nao sei, decide você",
+  ]) {
     assert.equal(isCorrection(text), false, text);
   }
 });
@@ -207,7 +218,13 @@ test("verification commands are classified by the step that runs them", () => {
     "pnpm why vitest",
     "npx playwright install chromium",
     "uv pip install pytest",
+    "python scripts/seed.py",
+    "bash -c x",
   ]) assert.equal(kind(command), undefined, command);
+  assert.equal(kind("bash scripts/preflight.sh --quick"), "preflight");
+  assert.equal(kind("./tooling/preflight.sh"), "preflight");
+  assert.equal(kind("python -m pytest -x tests"), "test");
+  assert.equal(kind("python3 -m mypy src"), "typecheck");
 });
 
 test("a check whose exit code the command hides has an unknown outcome", () => {
@@ -321,6 +338,53 @@ test("reports compare skill versions and rank repositories", async () => {
     human("não, está errado", "2026-11-05T10:01:00.000Z"),
   ]));
   assert.deepEqual(repoReport(usage).map((stats) => [stats.repo, stats.prompts, stats.correctionRate, stats.failures]), [["app", 2, 0.5, 1]]);
+});
+
+test("a renamed catalog skill keeps one history", () => {
+  const runs = parseTranscript("/t/r.jsonl", jsonl([
+    skillLoad("full-send", "v1", "2026-11-01T10:00:00.000Z"),
+    human("ok", "2026-11-01T10:01:00.000Z"),
+    skillLoad("send-full", "v2", "2026-11-02T10:00:00.000Z"),
+  ])).runs;
+  const report = skillReport(canonicalRuns(runs), ["send-full"]);
+  assert.deepEqual(report.skills.map((stats) => [stats.skill, stats.inCatalog, stats.runs, stats.versions]), [["send-full", true, 2, 2]]);
+  assert.deepEqual(report.unused, []);
+});
+
+test("a session belongs to the main checkout of its folder, also from a linked worktree or a subfolder", async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "skills-usage-repo-"));
+  roots.push(tmp);
+  await mkdir(path.join(tmp, "shop", ".git", "worktrees", "shop-item7"), { recursive: true });
+  await mkdir(path.join(tmp, "shop", "src"), { recursive: true });
+  await mkdir(path.join(tmp, "shop-item7", "packages"), { recursive: true });
+  await writeFile(path.join(tmp, "shop-item7", ".git"), `gitdir: ${path.join(tmp, "shop", ".git", "worktrees", "shop-item7")}\n`);
+  await mkdir(path.join(tmp, "parent", ".git", "modules", "lib"), { recursive: true });
+  await mkdir(path.join(tmp, "parent", "lib"), { recursive: true });
+  await writeFile(path.join(tmp, "parent", "lib", ".git"), "gitdir: ../.git/modules/lib\n");
+  const repoOf = (cwd: string) => parseTranscript("/t/x.jsonl", jsonl([{ ...human("oi", "2026-11-01T10:00:00.000Z"), cwd }])).prompts[0]?.repo;
+  assert.equal(repoOf(path.join(tmp, "shop", "src")), "shop");
+  assert.equal(repoOf(path.join(tmp, "shop-item7", "packages")), "shop");
+  assert.equal(repoOf(path.join(tmp, "parent", "lib")), "lib", "a submodule is its own repository");
+  assert.equal(repoOf("/gone/app/.claude/worktrees/feature-x"), "app", "a deleted folder keeps its name without the worktree suffix");
+});
+
+test("the skills report keeps command-only skills apart from unused ones", async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "skills-usage-catalog-"));
+  roots.push(tmp);
+  const transcripts = path.join(tmp, "projects");
+  await mkdir(path.join(transcripts, "p"), { recursive: true });
+  await writeFile(path.join(transcripts, "p", "s.jsonl"), jsonl([skillLoad("full-send", "v1", new Date().toISOString())]));
+  for (const [name, extra] of [["send-full", ""], ["retro-skill", "disable-model-invocation: true\n"], ["planning", ""]] as const) {
+    await mkdir(path.join(tmp, "catalog", name), { recursive: true });
+    await writeFile(path.join(tmp, "catalog", name, "SKILL.md"), `---\nname: ${name}\ndescription: x\n${extra}---\n\n# ${name}\n`);
+  }
+  const lines: string[] = [];
+  const args = ["--transcripts", transcripts, "--store", path.join(tmp, "usage"), "--catalog", path.join(tmp, "catalog")];
+  assert.equal(await main(["skills", ...args], (line) => lines.push(line)), 0);
+  const text = lines.join("\n");
+  assert.match(text, /^send-full\s+1\s/m);
+  assert.match(text, /^unused catalog skills: planning$/m);
+  assert.match(text, /^unused, load only by command: retro-skill$/m);
 });
 
 test("the CLI ingests and prints the repository report", async () => {
