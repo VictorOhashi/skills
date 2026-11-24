@@ -25,6 +25,7 @@ As skills nao funcionam copiando a pasta como esta. Um build junta `SKILL.md` co
 | [`pr-prints`](skills/pr-prints/SKILL.md) | Prints de mudanca visual anexados a PR ou issue. |
 | [`principle-ui-design`](skills/principle-ui-design/SKILL.md) | Principios de design de interface para desenhar e revisar telas: hierarquia, estados, texto, interacao, motion. |
 | [`send`](skills/send/SKILL.md) | Leva a tarefa ate o PR pronto para merge. |
+| [`skill-retro`](skills/skill-retro/SKILL.md) | Revisa as skills pelo uso real e propoe mudancas comprovadas por eval. |
 | [`validation-loop`](skills/validation-loop/SKILL.md) | Revisao final com revisor independente, em ate 3 rodadas. |
 | [`verification`](skills/verification/SKILL.md) | Menor verificacao suficiente antes de afirmar que funciona. |
 | [`visual-plan`](skills/visual-plan/SKILL.md) | Planos, diagnosticos e status como diagramas e tabelas. |
