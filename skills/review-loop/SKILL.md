@@ -1,5 +1,5 @@
 ---
-name: validation-loop
+name: review-loop
 description: Revisao final de uma entrega com revisor independente, em ate 3 rodadas, e passada de seguranca quando a mudanca pede. Roda em todo PR, antes do push final de trabalho que nao vira PR e quando solicitado.
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: full-send
+name: send-full
 description: 'Entrega uma tarefa ate o PR mergeado: roda a skill send ate pronto para merge e mergeia com o head verificado. Use quando o usuario pedir "full send" ou autorizar o merge de um PR ou pilha ("pode mergear", "mergeia quando pronto"); mencionar ou editar a skill nao a ativa.'
 ---
 
@@ -38,7 +38,7 @@ Alem de **Pronto para merge** de `send`:
   - review `APPROVED` no SHA do head, de conta que nao e bot e tem acesso de escrita, conferido pela referencia de GitHub de `send`; `reviewDecision` nao basta;
   - autorizacao explicita do usuario para aquele PR, dada depois do aviso de alto risco sobre esse head.
 
-  A secao `Merge gate (full-send)` do `pr.md` de `send` lista as aprovacoes humanas validas no head e sinais de alto risco por caminho. O sinal nao decide o risco; a decisao continua sua.
+  A secao `Merge gate (send-full)` do `pr.md` de `send` lista as aprovacoes humanas validas no head e sinais de alto risco por caminho. O sinal nao decide o risco; a decisao continua sua.
 
   Aprovacao de bot ou de agente nao conta. Sem aprovacao valida, relate o aviso com o SHA do head e encerre em **Aguardando** (aprovacao humana). Head novo, fora da regra de pilha, exige nova aprovacao.
 

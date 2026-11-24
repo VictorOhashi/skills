@@ -33,6 +33,6 @@ Comprove o comportamento atual com evidencia proporcional ao risco e declare o q
 
 ## 3. Conformidade com o design
 
-Em toda mudanca visual, antes de entregar, confira a mudanca pela skill `principle-ui-design`, no modo de verificar mudanca implementada.
+Em toda mudanca visual, antes de entregar, confira a mudanca pela skill `ui-principles`, no modo de verificar mudanca implementada.
 
 Relate essa checagem no status, citando o que foi conferido, e inclua-a nas verificacoes do corpo do PR.

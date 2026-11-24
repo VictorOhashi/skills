@@ -17,10 +17,10 @@ export const DEFAULT_ROOT = path.join(os.homedir(), ".agents", "artifacts");
 
 /**
  * Lighter efforts a caller may pick per role, besides the TOML's own. The caller can only lower effort
- * within this list: `validation-loop` sizes the review by its diff, and the council always runs at full effort.
+ * within this list: `review-loop` sizes the review by its diff, and the council always runs at full effort.
  */
 const LIGHTER_EFFORTS: Readonly<Record<string, readonly string[]>> = {
-  "validation-reviewer": ["medium"],
+  "loop-reviewer": ["medium"],
 };
 
 export function reviewerEffort(role: string, defined: string, requested: string | undefined): string {

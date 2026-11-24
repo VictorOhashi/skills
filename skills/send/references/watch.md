@@ -18,7 +18,7 @@ Leia o PR com o script desta skill, numa pasta do PR no diretorio temporario da 
 node <pasta da skill>/scripts/pr-state.mts <owner/repo#numero | URL do PR> <pasta do PR> --head <sha publicado> [--wait]
 ```
 
-O script exige Node 22.18+ e `gh` autenticado. Ele grava o `pr.md`: status, acoes classificadas, checks do head, threads abertas, reviews e comentarios gerais com o texto, trecho do log de cada job do GitHub Actions que falhou e a secao `Merge gate (full-send)`. A secao "New since the previous read" compara com a leitura anterior da mesma pasta.
+O script exige Node 22.18+ e `gh` autenticado. Ele grava o `pr.md`: status, acoes classificadas, checks do head, threads abertas, reviews e comentarios gerais com o texto, trecho do log de cada job do GitHub Actions que falhou e a secao `Merge gate (send-full)`. A secao "New since the previous read" compara com a leitura anterior da mesma pasta.
 
 - `--head`: o SHA que voce publicou. Head diferente vira a acao `head-changed`. Nos primeiros 3 minutos de cada execucao, ele conta como espera quando ainda e o head da leitura anterior ou quando a pasta nao tem leitura anterior, porque o GitHub atrasa o head logo depois do push.
 - `--merge-requested`: somente depois de pedir o merge. Fila e auto-merge passam a ser espera.
@@ -62,7 +62,7 @@ O `--wait` termina quando nada mais esta pendente, quando surge acao ou feedback
    **Proibido:** desativar testes ou afrouxar validacoes para passar o CI.
 
    Leia o trecho do log no `pr.md` e, se precisar, o log completo indicado. Corrija a causa raiz no escopo autorizado. Se a falha for de infraestrutura ou flake, faca um rerun por execucao, com **Publicar**. Se repetir, escale.
-5. **Comentarios.** Valide comentarios de bots contra o codigo antes de corrigir ou justificar falso positivo. Nit de bot e comentario sobre codigo que o PR nao introduziu nao exigem commit, salvo se o PR torna o problema alcancavel ou pior. Nesses casos, responda com o motivo ou proponha issue, seguindo a regra de achado de seguranca de `validation-loop`. Thread de bot respondida com motivo conta como tratada. Em pedido humano, a recusa e discordancia: escale antes de responder e nao resolva a thread. Trate pedidos humanos objetivos. Escale decisoes de abordagem, design e discordancias. Com **Publicar**, publique respostas curtas e resolva apenas threads efetivamente tratadas; sem ela, inclua as respostas propostas no relatorio. Nao publique comentario sem conteudo util, em PR ou issue.
+5. **Comentarios.** Valide comentarios de bots contra o codigo antes de corrigir ou justificar falso positivo. Nit de bot e comentario sobre codigo que o PR nao introduziu nao exigem commit, salvo se o PR torna o problema alcancavel ou pior. Nesses casos, responda com o motivo ou proponha issue, seguindo a regra de achado de seguranca de `review-loop`. Thread de bot respondida com motivo conta como tratada. Em pedido humano, a recusa e discordancia: escale antes de responder e nao resolva a thread. Trate pedidos humanos objetivos. Escale decisoes de abordagem, design e discordancias. Com **Publicar**, publique respostas curtas e resolva apenas threads efetivamente tratadas; sem ela, inclua as respostas propostas no relatorio. Nao publique comentario sem conteudo util, em PR ou issue.
 6. **Verificar e enviar.**
 
    **Atencao:** antes de publicar, releia o head remoto. Se outro autor ou processo o mudou, nao sobrescreva: pare e escale.

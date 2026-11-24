@@ -7,7 +7,7 @@ import {
   parseRef,
   render,
   stripHtmlComments,
-} from "./github-issue-read.mts";
+} from "./github-read.mts";
 
 const UUID = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 const OTHER = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";

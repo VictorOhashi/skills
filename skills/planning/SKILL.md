@@ -11,7 +11,7 @@ Chegue ao plano ou a implementacao com a causa entendida, a solucao mais simples
 
 ## 1. Causa e alcance
 
-- Leia a issue ou o PR de origem com `github-issue-read`.
+- Leia a issue ou o PR de origem com `github-read`.
 - Para uma mudanca, defina qual resultado observavel comprovara o comportamento pedido.
 - Ao criar ou alterar um contrato, esboce seu uso no ponto de chamada real que motivou a mudanca. Mostre como o chamador usa o resultado e trata a falha relevante.
 - Ao alterar um contrato compartilhado, identifique quais outros consumidores dependem do comportamento afetado, inclusive fora do diff.
@@ -50,5 +50,5 @@ Em pedido de analise, apresente os esbocos na conversa.
 
 ## 3. Forma da entrega
 
-- Mudanca visual nao trivial (tela nova, layout, fluxo ou animacao) entra no plano com mockup (`mockup`), consolidado no plano (`visual-plan`), e so e implementada depois da aprovacao do plano. Implemente direto apenas mudanca pequena, localizada e definida.
+- Mudanca visual nao trivial (tela nova, layout, fluxo ou animacao) entra no plano com mockup (`ui-mockup`), consolidado no plano (`visual-plan`), e so e implementada depois da aprovacao do plano. Implemente direto apenas mudanca pequena, localizada e definida.
 - Se o plano tiver validacao de UI, peca na mesma pergunta da aprovacao os pre-requisitos de ambiente de `verification`. Assim a entrega nao para depois esperando acesso ao ambiente.

@@ -1,5 +1,5 @@
 // Gathers a GitHub issue or pull request (body, comments, links and attachments) into one local folder.
-// Usage: node github-issue-read.mts <owner/repo#number | issue or PR URL> <out-dir>
+// Usage: node github-read.mts <owner/repo#number | issue or PR URL> <out-dir>
 // Requires Node 22.18+ (type stripping) and an authenticated `gh`.
 import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
@@ -236,7 +236,7 @@ async function download(a: Attachment, dir: string, name: string): Promise<{ fil
 async function main(argv: string[]): Promise<number> {
   const [refArg, outArg] = argv;
   if (!refArg || !outArg) {
-    console.error("usage: github-issue-read.mts <owner/repo#number | issue or PR URL> <out-dir>");
+    console.error("usage: github-read.mts <owner/repo#number | issue or PR URL> <out-dir>");
     return 1;
   }
   const ref = parseRef(refArg);

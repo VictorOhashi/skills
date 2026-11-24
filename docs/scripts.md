@@ -10,23 +10,23 @@ Regras de onde fica cada script e como escreve-lo: "Pastas da skill" em [writing
 | `trigger-eval.mts` | `scripts/` | Mede qual skill cada prompt de `evals/triggers.json` carrega. |
 | `usage.mts` | `scripts/` | Le os transcripts do Claude Code e relata uso por skill e sinais por repositorio. |
 | `pr-state.mts` | `skills/send/scripts/` | Le o estado de um PR para o acompanhamento de `send`. |
-| `review-scope.mts` | `skills/validation-loop/scripts/` | Fixa base, escopo e nivel da revisao. |
-| `github-issue-read.mts` | `skills/github-issue-read/scripts/` | Grava issue ou PR do GitHub numa pasta local. |
+| `review-scope.mts` | `skills/review-loop/scripts/` | Fixa base, escopo e nivel da revisao. |
+| `github-read.mts` | `skills/github-read/scripts/` | Grava issue ou PR do GitHub numa pasta local. |
 
 ## Revisores isolados no Codex (`codex-review.mts`)
 
 Papel revisor e todo agente Codex com nome `<nome>-reviewer`; o executor recusa os demais, como `pr-observer` e `arena-candidate`.
 
-Os revisores das skills (`validation-loop`, `council`, `ban-*` e o juiz de `arena`) rodam por `codex-review.mts` em sessoes independentes do Codex CLI. Cada processo recebe `read-only` e aprovacao `never`, sem historico da implementacao. A sessao principal continua com escrita. Subagentes nativos nao sao usados nessa rota, pois herdariam as permissoes da sessao principal.
+Os revisores das skills (`review-loop`, `council`, `ban-*` e o juiz de `arena`) rodam por `codex-review.mts` em sessoes independentes do Codex CLI. Cada processo recebe `read-only` e aprovacao `never`, sem historico da implementacao. A sessao principal continua com escrita. Subagentes nativos nao sao usados nessa rota, pois herdariam as permissoes da sessao principal.
 
 O executor le o modelo, o papel e o esforco padrao do TOML compilado do papel, em `../agents/<papel>.toml` ao lado da pasta de scripts instalada. Antes de iniciar, comprova a negacao de escrita pelo sandbox em arquivo temporario. Inicia o Codex numa pasta neutra, com `--ignore-user-config`, sem apps, plugins, memoria ou delegacao; configuracoes pessoais e do projeto nao injetam MCP ou permissoes mais amplas. A autenticacao continua pelo mecanismo normal do Codex, sem copiar credenciais. O briefing deve incluir as instrucoes aplicaveis ao repositorio revisado.
 
 ```bash
-node {{SCRIPTS_DIR}}/codex-review.mts validation-reviewer <pasta da rodada> --repo <repositorio revisado> [--effort medium] < <briefing.txt>
-node {{SCRIPTS_DIR}}/codex-review.mts validation-reviewer <nova pasta da rodada> <pasta anterior> --repo <repositorio revisado> < <delta.txt>
+node {{SCRIPTS_DIR}}/codex-review.mts loop-reviewer <pasta da rodada> --repo <repositorio revisado> [--effort medium] < <briefing.txt>
+node {{SCRIPTS_DIR}}/codex-review.mts loop-reviewer <nova pasta da rodada> <pasta anterior> --repo <repositorio revisado> < <delta.txt>
 ```
 
-A pasta da rodada fica dentro dos artefatos (`$HOME/.agents/artifacts`), fora do repositorio. Seu pai deve existir e ser validado pelo caminho canonico antes de qualquer criacao. O esforco vem do TOML do papel; `validation-reviewer` aceita so `--effort medium` como alternativa, e a retomada repete o mesmo valor. O executor salva `runtime.json` (modelo, esforco, sandbox, aprovacao, teste de escrita e ID da sessao) e `review.md` (parecer). Saida sem esses dados confirmados, sem parecer ou com erro nao aprova a revisao. A retomada exige o registro verificado de uma rodada irma, do mesmo papel e repositorio; o ID retornado precisa coincidir. Os arquivos de saida sao criados exclusivamente, sem seguir symlinks nem substituir pareceres existentes. Metadados sao aceitos apenas do cabecalho inicial do Codex, nunca do briefing ou de saidas de ferramentas. Nao use `--last` nem retome a sessao da implementacao. Para `council`, use `council-reviewer` e mantenha IDs separados para o avaliador inicial, A e B.
+A pasta da rodada fica dentro dos artefatos (`$HOME/.agents/artifacts`), fora do repositorio. Seu pai deve existir e ser validado pelo caminho canonico antes de qualquer criacao. O esforco vem do TOML do papel; `loop-reviewer` aceita so `--effort medium` como alternativa, e a retomada repete o mesmo valor. O executor salva `runtime.json` (modelo, esforco, sandbox, aprovacao, teste de escrita e ID da sessao) e `review.md` (parecer). Saida sem esses dados confirmados, sem parecer ou com erro nao aprova a revisao. A retomada exige o registro verificado de uma rodada irma, do mesmo papel e repositorio; o ID retornado precisa coincidir. Os arquivos de saida sao criados exclusivamente, sem seguir symlinks nem substituir pareceres existentes. Metadados sao aceitos apenas do cabecalho inicial do Codex, nunca do briefing ou de saidas de ferramentas. Nao use `--last` nem retome a sessao da implementacao. Para `council`, use `council-reviewer` e mantenha IDs separados para o avaliador inicial, A e B.
 
 Referencias oficiais: [subagentes](https://learn.chatgpt.com/docs/agent-configuration/subagents), [registros de agentes](https://learn.chatgpt.com/docs/config-file/config-reference), [caminho das skills](https://learn.chatgpt.com/docs/build-skills).
 

@@ -1,5 +1,5 @@
 ---
-name: principle-ui-design
+name: ui-principles
 description: Principios de bom design de interface para desenhar e revisar telas, fluxos e componentes, com trabalho da tela, hierarquia, layout, tipografia, cor, estados, texto, interacao, acessibilidade e motion. Use ao desenhar tela, fluxo ou componente, ao revisar ou polir UI, ou quando a interface parece amadora, generica ou confusa, quebra com dados reais ou responde devagar. Tokens, componentes e estetica vem do design system do projeto.
 ---
 

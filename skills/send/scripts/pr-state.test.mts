@@ -180,7 +180,7 @@ test("humanApprovalsOnHead keeps only write-access humans on the current head", 
   assert.deepEqual(humanApprovalsOnHead(pr({ reviews })).map((r) => r.id), ["1"]);
 });
 
-test("riskSignals flags the high-risk areas of full-send by path", () => {
+test("riskSignals flags the high-risk areas of send-full by path", () => {
   const signals = riskSignals([
     ".github/workflows/ci.yml", "infra/main.tf", "db/migrations/001.sql", "src/auth/session.ts",
     "src/payments/pix.ts", "src/author.ts", "src/ui/button.tsx",

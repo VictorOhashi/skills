@@ -1,4 +1,4 @@
-// Fixes the review scope of a validation-loop run: base commit, changed files (tracked and untracked),
+// Fixes the review scope of a review-loop run: base commit, changed files (tracked and untracked),
 // diff size and the reviewer level (light or full) that size calls for. Prints JSON and a briefing header.
 // Usage: node review-scope.mts <repo> [--base <ref>] [--security] [-- <path>...]
 // Requires Node 22.18+ (type stripping) and git.
@@ -31,7 +31,7 @@ export const LIGHT_MAX_FILES = 8;
 const BULK = /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|Cargo\.lock|Gemfile\.lock|poetry\.lock|go\.sum)$|(^|\/)__snapshots__\/|\.snap$/;
 
 /**
- * Path heuristics for the high-risk list of `full-send`. Skills cannot import each other's scripts, so
+ * Path heuristics for the high-risk list of `send-full`. Skills cannot import each other's scripts, so
  * `send`'s pr-state script keeps its own copy; change both together. Authentication and payment also
  * match camelCase words (`useAuth.ts`, `PaymentService.ts`).
  */

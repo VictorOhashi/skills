@@ -1,5 +1,5 @@
 ---
-name: github-issue-read
+name: github-read
 description: Le uma issue ou PR do GitHub inteiro, com comentarios, sub-issues, vinculos e imagens anexadas, por um script que grava tudo numa pasta local. Use antes de analisar, planejar ou implementar a partir de uma issue ou PR do GitHub. Abrir, comentar, editar ou fechar issue nao e desta skill.
 ---
 
@@ -13,10 +13,10 @@ Contexto completo da issue ou do PR, com texto, vinculos e evidencias visuais, a
 
 ## Leitura
 
-1. Rode o script desta skill, `scripts/github-issue-read.mts`, com o repositorio explicito e uma pasta nova no diretorio temporario da harness:
+1. Rode o script desta skill, `scripts/github-read.mts`, com o repositorio explicito e uma pasta nova no diretorio temporario da harness:
 
    ```bash
-   node <pasta da skill>/scripts/github-issue-read.mts <owner/repo#numero | URL da issue ou do PR> <pasta de saida>
+   node <pasta da skill>/scripts/github-read.mts <owner/repo#numero | URL da issue ou do PR> <pasta de saida>
    ```
 
    O script exige Node 22.18+ e `gh` autenticado. Nao passe numero sem repositorio.

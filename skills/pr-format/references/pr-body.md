@@ -43,7 +43,7 @@ Closes #NNN                      <!-- ou "Parte de #NNN"; em stack: "Empilhado s
 
 ## Pendencia de revisao
 
-Em rascunho pedido pelo usuario com `validation-loop` **Escalado**, abra o corpo com `> [!IMPORTANT]` e uma linha por item pendente de decisao. Remova o bloco quando a decisao estiver aplicada. Achado de seguranca segue a regra de `validation-loop`.
+Em rascunho pedido pelo usuario com `review-loop` **Escalado**, abra o corpo com `> [!IMPORTANT]` e uma linha por item pendente de decisao. Remova o bloco quando a decisao estiver aplicada. Achado de seguranca segue a regra de `review-loop`.
 
 ## Risco
 

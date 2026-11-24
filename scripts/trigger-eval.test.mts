@@ -51,13 +51,13 @@ test("the cases of this catalog name only model-invocable skills", async () => {
 test("scores count misses for the expected skill and wrong picks for the chosen one", () => {
   const results = [
     { prompt: "a", expect: "send", picked: "send", pass: true },
-    { prompt: "b", expect: "send", picked: "full-send", pass: false },
-    { prompt: "c", expect: null, picked: "full-send", pass: false },
+    { prompt: "b", expect: "send", picked: "send-full", pass: false },
+    { prompt: "c", expect: null, picked: "send-full", pass: false },
     { prompt: "d", expect: "send", picked: null, pass: false, error: "exit 1" },
   ];
   assert.deepEqual(scoreBySkill(results), [
-    { skill: "full-send", cases: 0, hits: 0, wrongPicks: 2 },
     { skill: "send", cases: 2, hits: 1, wrongPicks: 0 },
+    { skill: "send-full", cases: 0, hits: 0, wrongPicks: 2 },
   ]);
   const run = (passes: boolean[]): TriggerRun => ({ createdAt: "", catalogHash: "", model: null, results: passes.map((pass, index) => ({ prompt: String(index), expect: null, picked: null, pass })) });
   assert.deepEqual(flips(run([true, false, true]), run([false, true, true])).map((result) => [result.prompt, result.pass]), [["0", false], ["1", true]]);
