@@ -98,13 +98,13 @@ export type Usage = {
 
 type Store = Usage & {
   /** Bumped when parsing changes, so the next ingest re-reads every transcript still on disk. */
-  version: 10;
+  version: 11;
   /** Transcript path -> mtime already ingested. */
   files: Record<string, number>;
 };
 
 /** Bump when a classification changes: the store is rebuilt, so old and new rules never mix (entries of deleted transcripts are lost). */
-const STORE_VERSION = 10;
+const STORE_VERSION = 11;
 const SKILL_HEADER = "Base directory for this skill: ";
 const INTERRUPT = "[Request interrupted by user";
 const WORKTREE = /\/\.(claude|codex)\/worktrees\/[^/]+/;
@@ -369,7 +369,8 @@ export function failureKind(output: string): FailureKind {
 }
 
 /** Separator after the step (`&&`, `||`, `|`, `|&`, `;`, newline), and whether another step follows. */
-type Step = { program: string; args: string[]; next: string | undefined; last: boolean; orAfter: boolean };
+/** `after` is the raw text of the step that follows, kept before trivial steps such as `echo` are dropped. */
+type Step = { program: string; args: string[]; next: string | undefined; after: string; last: boolean; orAfter: boolean };
 
 /** The shell text with heredoc bodies and quoted text replaced, since they are data. */
 function shellText(command: string): string {
@@ -381,7 +382,8 @@ function shellText(command: string): string {
       return { lines: [...state.lines, line], heredoc: marker?.[1] };
     }, { lines: [], heredoc: undefined })
     .lines.join("\n")
-    .replace(/'[^']*'|"(?:[^"\\]|\\.)*"|\$\([^)]*\)/g, "x");
+    // `$?` survives inside quotes: `echo "exit $?"` still prints the code of the step before it.
+    .replace(/'[^']*'|"(?:[^"\\]|\\.)*"|\$\([^)]*\)/g, (quoted) => (quoted.startsWith('"') && quoted.includes("$?") ? "x$?" : "x"));
 }
 
 /** The simple commands of a shell line; `last` is set before trivial commands are dropped, since `echo` and the like set the exit status too. */
@@ -390,11 +392,13 @@ function shellSteps(command: string): Step[] {
   const steps: Step[] = [];
   for (let index = 0; index < parts.length; index += 2) {
     const words = (parts[index] ?? "").trim().split(/\s+/).filter(Boolean);
+    // `(pnpm preflight; echo $?)`: a subshell opens on the program's own word.
+    if (words[0] && words[0].length > 1 && words[0].startsWith("(")) words[0] = words[0].replace(/^\(+/, "");
     while (words[0] && (/^\w+=/.test(words[0]) || PREFIXES.has(words[0]))) {
       // `timeout 600 pnpm test`: the duration and the flags before it are not the program.
       if (words.shift() === "timeout") while (words[0] && (words[0].startsWith("-") || /^\d/.test(words[0]))) words.shift();
     }
-    if (words[0]) steps.push({ program: path.basename(words[0]), args: words.slice(1), next: parts[index + 1], last: false, orAfter: false });
+    if (words[0]) steps.push({ program: path.basename(words[0]), args: words.slice(1), next: parts[index + 1], after: parts[index + 2] ?? "", last: false, orAfter: false });
   }
   const final = steps.at(-1);
   if (final) final.last = true;
@@ -441,7 +445,7 @@ export function checkOf(command: string): { kind: CheckKind; masked: boolean; re
   const errexit = /\bset\s+-\w*e/.test(shell);
   let found: { kind: CheckKind; masked: boolean; reported: boolean } | undefined;
   let pushes = false;
-  for (const { program, args, next, last, orAfter } of shellSteps(command)) {
+  for (const { program, args, next, after, last, orAfter } of shellSteps(command)) {
     // Flag values (`--filter test-kit`) name targets, not the check.
     const words = args.filter((word, index) => !word.startsWith("-") && !VALUE_FLAGS.has(args[index - 1] ?? ""));
     const script = path.basename(words[0] ?? "");
@@ -460,7 +464,7 @@ export function checkOf(command: string): { kind: CheckKind; masked: boolean; re
     if (!kind || (found && CHECK_ORDER.indexOf(kind) >= CHECK_ORDER.indexOf(found.kind))) continue;
     const masked = next === "||" || orAfter || ((next === "|" || next === "|&") && !pipefail) || ((next === ";" || next === "\n") && !last && !errexit);
     // `$?` after `check;` is the check's code; after `check | tail;` it is tail's, unless PIPESTATUS keeps it.
-    const reported = masked && (((next === ";" || next === "\n") && !orAfter && /\$\?/.test(command)) || /\$\{?PIPESTATUS/.test(command));
+    const reported = masked && (((next === ";" || next === "\n") && !orAfter && /\$\?/.test(after)) || /\$\{?PIPESTATUS/.test(command));
     found = { kind, masked, reported };
   }
   return found && { ...found, pushes };
@@ -730,11 +734,30 @@ export function skillReport(runs: SkillRun[], catalog: string[]): { skills: Skil
 export function versionReport(runs: SkillRun[], skill: string, checks: CheckRun[] = []): VersionStats[] {
   return [...groupBy(runs.filter((run) => run.skill === skill), (run) => run.version)]
     .map(([version, group]) => {
-      const sessions = new Set(group.map((run) => run.sessionId));
-      const own = checks.filter((entry) => sessions.has(entry.sessionId));
-      return { version, ...runMetrics(group), firstUsed: group[0]?.at ?? "", checks: own.length, unknownRate: unknownRate(own), repeatedGate: repeatedGateRate(own) };
+      const own = checksAfterLoad(runs.filter((run) => run.skill === skill), version, checks);
+      const bySession = [...groupBy(own, (entry) => entry.sessionId).values()].map(unknownRate);
+      return {
+        version, ...runMetrics(group), firstUsed: group[0]?.at ?? "", checks: own.length,
+        // Mean of the session rates, so one long session does not decide the version.
+        unknownRate: bySession.length === 0 ? 0 : sum(bySession) / bySession.length,
+        repeatedGate: repeatedGateRate(own),
+      };
     })
     .sort((a, b) => a.firstUsed.localeCompare(b.firstUsed));
+}
+
+/** Checks of each session from the first load of `version` until a load of another version of the same skill. */
+function checksAfterLoad(skillRuns: SkillRun[], version: string, checks: CheckRun[]): CheckRun[] {
+  const windows = new Map<string, Array<[string, string]>>();
+  for (const [sessionId, loads] of groupBy(skillRuns, (run) => run.sessionId)) {
+    const sorted = [...loads].sort((a, b) => a.at.localeCompare(b.at));
+    sorted.forEach((run, index) => {
+      if (run.version !== version) return;
+      const end = sorted.slice(index + 1).find((later) => later.version !== version)?.at ?? "\uffff";
+      windows.set(sessionId, [...(windows.get(sessionId) ?? []), [run.at, end]]);
+    });
+  }
+  return checks.filter((entry) => windows.get(entry.sessionId)?.some(([from, to]) => entry.at >= from && entry.at < to));
 }
 
 /** Checks other than pushes and CI waits whose command hides the exit code. */
@@ -974,7 +997,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
         String(Math.round(stats.medianOutputTokens)), percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate),
         String(stats.checks), percent(stats.unknownRate), optionalPercent(stats.repeatedGate),
       ])),
-      "checks, unknown and gate rep cover the sessions where the version loaded",
+      "checks, unknown and gate rep: checks from the version's load until another version loads; unknown is the mean of the session rates",
       "recent runs (repo, reaction, transcript, record of the load):",
       ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}  ${run.id}`),
     ]);

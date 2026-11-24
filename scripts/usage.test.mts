@@ -255,6 +255,9 @@ test("a check that prints its own exit code is judged by the printed code", () =
   assert.equal(checkOf("pnpm test | tail -3")?.reported, false);
   assert.equal(checkOf("pnpm test 2>&1 | tail -5; echo \"exit $?\"")?.reported, false, "$? after a pipe is the code of tail");
   assert.equal(checkOf("pnpm test | tail -5; echo \"exit ${PIPESTATUS[0]}\"")?.reported, true);
+  assert.equal(checkOf("pnpm test > log 2>&1; tail -30 log; echo \"exit $?\"")?.reported, false, "the code printed is the one of tail");
+  assert.equal(checkOf("pnpm test; pnpm lint; echo $?")?.reported, false);
+  assert.deepEqual(checkOf("(pnpm preflight > log 2>&1; echo EXIT $? >> log); tail -15 log"), { kind: "preflight", masked: true, reported: true, pushes: false }, "a subshell still runs the check");
   assert.equal(printedExit("...\nEXIT 1\n"), 1);
   assert.equal(printedExit("done\nexit=0"), 0);
   assert.equal(printedExit("Tests: 3 passed\n"), undefined);
@@ -379,7 +382,8 @@ test("reports compare skill versions and rank repositories", async () => {
   assert.deepEqual(versionReport(runs, "send").map((stats) => [stats.firstUsed.slice(0, 10), stats.correctionRate]), [["2026-11-01", 0], ["2026-11-05", 1]]);
   const check = (sessionId: string, outcome: "ok" | "unknown") => ({ id: "x", sessionId, file: "f", repo: "app", at: "2026-11-05T10:00:30.000Z", kind: "test" as const, command: "pnpm test", seconds: 1, background: false, outcome, pushes: false });
   const bySession = runs.map((run) => ({ ...run, sessionId: run.file }));
-  assert.deepEqual(versionReport(bySession, "send", [check("/t/a.jsonl", "ok"), check("/t/b.jsonl", "unknown"), check("/t/b.jsonl", "unknown"), check("other", "unknown")]).map((stats) => [stats.checks, stats.unknownRate]), [[1, 0], [2, 1]], "checks count in the sessions where each version loaded");
+  const before = { ...check("/t/b.jsonl", "unknown"), at: "2026-11-05T09:00:00.000Z" };
+  assert.deepEqual(versionReport(bySession, "send", [check("/t/a.jsonl", "ok"), before, check("/t/b.jsonl", "unknown"), check("/t/b.jsonl", "unknown"), check("other", "unknown")]).map((stats) => [stats.checks, stats.unknownRate]), [[1, 0], [2, 1]], "checks count from the load on, in the sessions where each version loaded");
 
   const usage = parseTranscript("/t/d.jsonl", jsonl([
     human("faz o fix", "2026-11-05T10:00:00.000Z"),
