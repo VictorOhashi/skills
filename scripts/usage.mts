@@ -80,7 +80,7 @@ export type CheckKind = "preflight" | "push" | "e2e" | "test" | "typecheck" | "l
 /**
  * A verification command and how long it took: from the call to its result, or to the completion notice when it ran
  * in the background. `outcome` is unknown when the command hides the check's exit code: a pipe without `pipefail`,
- * `|| ...`, or another command after `;`. Permission denials, interruptions and superseded runs are not recorded.
+ * `|| ...`, or another command after `;` that does not print `$?`. Permission denials, interruptions and superseded runs are not recorded.
  */
 export type CheckRun = Source & {
   kind: CheckKind;
@@ -375,7 +375,7 @@ export function failureKind(output: string): FailureKind {
   if (output.startsWith("The user doesn't want to proceed")) return "rejected";
   if (output.startsWith("[Tool call interrupted")) return "interrupted";
   if (/command not found|: not found\b/.test(output)) return "not-found";
-  if (/No such file or directory|ENOENT/.test(output)) return "missing-path";
+  if (/No such file or directory|ENOENT|^File does not exist/.test(output)) return "missing-path";
   if (/^Command timed out|timed out after/i.test(output)) return "timeout";
   return "exit";
 }
@@ -595,8 +595,10 @@ export async function ingestUsage(storeDir: string, transcriptsRoot: string): Pr
     store.files[file] = info.mtimeMs;
   }
   if (changed.size === 0) return store;
+  // A current copy of a record (a fork still on disk) replaces the stale entry of its deleted original.
   const merge = <T extends Source>(kept: T[], pick: (usage: Usage) => T[], keepLater: (a: T, b: T) => boolean): T[] =>
-    dedupe([...kept.filter((entry) => !changed.has(entry.file)), ...[...changed.values()].flatMap(pick)], keepLater);
+    dedupe([...kept.filter((entry) => !changed.has(entry.file)), ...[...changed.values()].flatMap(pick)],
+      (a, b) => (b.stale === true && a.stale !== true) || (a.stale === b.stale && keepLater(a, b)));
   store.runs = merge(store.runs, (usage) => usage.runs, (a, b) => a.endedAt > b.endedAt);
   store.prompts = merge(store.prompts, (usage) => usage.prompts, () => false);
   store.findings = merge(store.findings, (usage) => usage.findings, (a, b) => a.at < b.at);
@@ -717,11 +719,13 @@ export type CheckStats = {
   sessions: number;
   /** Time stats leave out `late` runs: longer than an hour, a stuck process or a delayed notice. */
   late: number;
+  /** Runs from deleted transcripts, left out of `failRate` and `unknownRate`. */
+  stale: number;
   medianSeconds: number;
   p90Seconds: number;
   totalHours: number;
   failRate: number;
-  /** Runs whose command hides the exit code (pipe without pipefail, `|| ...`, a command after `;`): their failures do not show. */
+  /** Runs whose command hides the exit code (pipe without pipefail, `|| ...`, a command after `;` that does not print `$?`): their failures do not show. */
   unknownRate: number;
   /** Runs of this kind per session that ran it. */
   medianPerSession: number;
@@ -904,6 +908,7 @@ export function checkReport(checks: CheckRun[]): CheckStats[] {
         background: group.filter((entry) => entry.background).length,
         sessions: perSession.length,
         late: group.length - seconds.length,
+        stale: group.filter((entry) => entry.stale).length,
         medianSeconds: median(seconds),
         p90Seconds: percentile(seconds, 0.9),
         totalHours: sum(seconds) / 3600,
@@ -916,12 +921,12 @@ export function checkReport(checks: CheckRun[]): CheckStats[] {
     .sort((a, b) => b.totalHours - a.totalHours);
 }
 
-export function parseSince(value: string | undefined, now = new Date()): Date {
+export function parseSince(value: string | undefined, now = new Date(), option = "--since"): Date {
   const raw = value ?? "30d";
   const match = /^(\d+)d$/.exec(raw);
   if (match) return new Date(now.getTime() - Number(match[1]) * 86_400_000);
   const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) throw new Error(`Invalid --since: ${raw}. Use <days>d or an ISO date`);
+  if (Number.isNaN(date.getTime())) throw new Error(`Invalid ${option}: ${raw}. Use <days>d or an ISO date`);
   return date;
 }
 
@@ -1039,7 +1044,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
   if ((command !== "skills" && command !== "repos") || rest.length > 0) throw new Error(USAGE);
   const all = await ingestUsage(values.store ?? DEFAULT_STORE, values.transcripts ?? DEFAULT_TRANSCRIPTS);
   const from = parseSince(values.since);
-  const to = values.until === undefined ? undefined : parseSince(values.until);
+  const to = values.until === undefined ? undefined : parseSince(values.until, new Date(), "--until");
   const window = <T extends Source>(entries: T[]): T[] => since(entries, from).filter((entry) => to === undefined || entry.at < to.toISOString());
   const usage: Usage = { runs: canonicalRuns(window(all.runs)), prompts: window(all.prompts), findings: window(all.findings), failures: window(all.failures), checks: window(all.checks) };
   const emit = (value: unknown, lines: () => string[]): number => {
@@ -1051,6 +1056,8 @@ export async function main(argv: string[], print: (line: string) => void = conso
   const span = `since ${day(from.toISOString())}${to ? ` until ${day(to.toISOString())}` : ""}`;
   /** A classification rate over stale entries only has no data: print `-`, not 0%. */
   const fresh = (value: number, total: number, stale: number): string => (total > 0 && stale === total ? "-" : percent(value));
+  /** Stale entries point at a deleted transcript: `turn` cannot read them. */
+  const mark = (entry: Source): string => (entry.stale ? "  stale" : "");
 
   if (command === "skills" && values.skill) {
     const skill = values.skill;
@@ -1068,7 +1075,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
         ])),
       "stale: runs from deleted transcripts, left out of tool err and correct; checks, unknown and gate rep: checks from the version's load until another version loads; unknown is the mean of the session rates",
       "recent runs (repo, reaction, transcript, record of the load):",
-      ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}  ${run.id}`),
+      ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}  ${run.id}${mark(run)}`),
     ]);
   }
   if (command === "skills") {
@@ -1076,10 +1083,10 @@ export async function main(argv: string[], print: (line: string) => void = conso
     const report = skillReport(usage.runs, catalog.names);
     const unused = report.unused.filter((name) => !catalog.commandOnly.includes(name));
     const unusedCommands = report.unused.filter((name) => catalog.commandOnly.includes(name));
-    return emit({ since: from.toISOString(), skills: report.skills, unused, unusedCommands }, () => [
+    return emit({ since: from.toISOString(), until: to?.toISOString(), skills: report.skills, unused, unusedCommands }, () => [
       `${span}: ${usage.runs.length} skill runs`,
-      ...table(["skill", "runs", "user", "sess", "repos", "vers", "turn s", "turn out", "tool err", "interr", "correct", "last"], report.skills.map((stats) => [
-        stats.inCatalog ? stats.skill : `${stats.skill} *`, String(stats.runs), String(stats.userRuns), String(stats.sessions), String(stats.repos),
+      ...table(["skill", "runs", "stale", "user", "sess", "repos", "vers", "turn s", "turn out", "tool err", "interr", "correct", "last"], report.skills.map((stats) => [
+        stats.inCatalog ? stats.skill : `${stats.skill} *`, String(stats.runs), String(stats.staleRuns), String(stats.userRuns), String(stats.sessions), String(stats.repos),
         String(stats.versions), String(Math.round(stats.medianSeconds)), String(Math.round(stats.medianOutputTokens)),
         fresh(stats.toolErrorRate, stats.runs, stats.staleRuns), percent(stats.interruptRate), fresh(stats.correctionRate, stats.runs, stats.staleRuns), day(stats.lastUsed),
       ])),
@@ -1101,25 +1108,25 @@ export async function main(argv: string[], print: (line: string) => void = conso
     const gate = checks.some((stats) => stats.kind === "preflight") ? "preflight" : undefined;
     const busiest = gate ? busiestSessions(only(usage.checks), gate) : [];
     const slowest = only(usage.checks).filter((entry) => entry.seconds <= LATE_SECONDS).sort((a, b) => b.seconds - a.seconds).slice(0, 10);
-    return emit({ repo, since: from.toISOString(), checks, busiest, slowest, areas, failures, corrections, findings, recentFailures }, () => [
-      `${repo} since ${day(from.toISOString())}`,
+    return emit({ repo, since: from.toISOString(), until: to?.toISOString(), checks, busiest, slowest, areas, failures, corrections, findings, recentFailures }, () => [
+      `${repo} ${span}`,
       "verification time (checks, pushes, CI waits):",
       ...table(["kind", "runs", "bg", "late", "sess", "p50 s", "p90 s", "total h", "fail", "unknown", "per sess p50", "p90"], checks.map((stats) => [
         stats.kind, String(stats.runs), String(stats.background), String(stats.late), String(stats.sessions), String(Math.round(stats.medianSeconds)), String(Math.round(stats.p90Seconds)),
-        stats.totalHours.toFixed(1), percent(stats.failRate), percent(stats.unknownRate), String(stats.medianPerSession), String(stats.p90PerSession),
+        stats.totalHours.toFixed(1), fresh(stats.failRate, stats.runs, stats.stale), fresh(stats.unknownRate, stats.runs, stats.stale), String(stats.medianPerSession), String(stats.p90PerSession),
       ])),
-      ...(checks.some((stats) => stats.unknownRate > 0) ? ["unknown: the command hides the exit code (pipe without pipefail, `|| ...`, a command after `;`), so a failure would not show"] : []),
+      ...(checks.some((stats) => stats.unknownRate > 0) ? ["unknown: the command hides the exit code (pipe without pipefail, `|| ...`, a command after `;` that does not print `$?`), so a failure would not show"] : []),
       ...(checks.some((stats) => stats.late > 0) ? ["late: over an hour, left out of the times (stuck process or delayed notice)"] : []),
       "review findings by area (blocker and should):",
       ...table(["area", "blocker", "should", "sess", "last"], areas.slice(0, 15).map((stats) => [stats.area, String(stats.blockers), String(stats.shoulds), String(stats.sessions), day(stats.last)])),
       `failed commands (${sum(probes.map((stats) => stats.count))} failed reads left out; see --json):`,
       ...table(["kind", "command", "count", "sess", "last"], failures.filter((stats) => stats.kind !== "probe").slice(0, 15).map((stats) => [stats.kind, stats.command, String(stats.count), String(stats.sessions), day(stats.last)])),
       "recent corrections (transcript, record):",
-      ...corrections.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.file}  ${entry.id}`),
+      ...corrections.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.file}  ${entry.id}${mark(entry)}`),
       "recent blocker and should findings (transcript):",
-      ...findings.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.severity}  ${entry.path}  ${entry.file}`),
+      ...findings.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.severity}  ${entry.path}  ${entry.file}${mark(entry)}`),
       "recent failed commands (transcript, tool call):",
-      ...recentFailures.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${entry.command}  ${entry.file}  ${entry.id}`),
+      ...recentFailures.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${entry.command}  ${entry.file}  ${entry.id}${mark(entry)}`),
       ...(gate ? [`sessions that ran ${gate} most (runs, pushes, transcript):`] : []),
       ...busiest.map((session) => `  ${session.last.slice(0, 16)}  ${session.runs}  ${session.pushes}  ${session.file}`),
       "slowest checks (transcript, tool call):",
@@ -1127,7 +1134,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
     ]);
   }
   const repos = repoReport(usage);
-  return emit({ since: from.toISOString(), repos }, () => [
+  return emit({ since: from.toISOString(), until: to?.toISOString(), repos }, () => [
     `${span}: ${repos.length} repositories`,
     ...table(["repo", "sess", "stale", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "unknown", "gate rep", "last"], repos.map((stats) => [
       stats.repo, String(stats.sessions), String(stats.staleSessions), String(stats.prompts), fresh(stats.correctionRate, stats.sessions, stats.staleSessions), String(stats.interrupts),

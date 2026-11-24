@@ -32,7 +32,7 @@ O checkout do catalogo e o submodulo `skills/` do checkout de perfis registrado 
 ## Procedimento
 
 1. **Linha de base.** Rode os dois relatorios dos ultimos 30 dias e o eval completo. Guarde o caminho do run salvo do eval.
-2. **Acompanhamento.** Para cada linha `aceita` do registro com acompanhamento vazio ou `a confirmar`, compare duas janelas pela linha `all`: `--since <data - 30 dias> --until <data>` e `--since <data>`. Use `--skill` para skill e `repos` para regra descumprida em varios repositorios. Com pelo menos 10 execucoes, ou 10 sessoes, fora de `stale` em cada janela, anote:
+2. **Acompanhamento.** Para cada linha `aceita` do registro com acompanhamento vazio ou `a confirmar`, rode `--skill` da skill alterada, ou da skill dona da regra, em duas janelas: `--since <data - 30 dias> --until <data>` e `--since <data>`. `<data>` e o `first` da primeira versao depois da `versao anterior` do registro. Compare a linha `all` das duas janelas. Com pelo menos 10 execucoes fora de `stale` em cada janela, anote:
    - `melhorou` ou `piorou`: a taxa do sinal esperado mudou pelo menos 5 pontos (correcao, interrupcao, erro de ferramenta) ou 10 pontos (`unknown`, `gate rep`), e a janela com a taxa maior tem pelo menos 3 ocorrencias confirmadas no transcript;
    - `a confirmar` quando a mediana de `turn out` subiu mais de 20%, com pelo menos 30 execucoes em cada janela. A proxima retro troca por `piorou` se a alta continuar, ou por `igual`;
    - `igual` nos demais casos.
@@ -41,7 +41,7 @@ O checkout do catalogo e o submodulo `skills/` do checkout de perfis registrado 
 3. **Candidatos.** Escolha ate tres, nesta ordem:
    1. mudanca de retro anterior com acompanhamento `piorou`, ou caso de eval falhando. Para `piorou`, proponha reverter a mudanca ou corrigi-la;
    2. skill com pelo menos 10 execucoes e taxa de correcao ou de interrupcao de pelo menos o dobro da mediana das skills do catalogo com 10 execucoes ou mais, e de pelo menos 5%, com 3 ocorrencias ou mais;
-   3. regra de skill do catalogo descumprida em dois repositorios ou mais: `unknown` acima de 50%, contra a regra de pipefail de `verification`, ou `gate rep` acima de 25%, contra a regra de um gate por publicacao. `gate rep` tambem conta a reexecucao depois de corrigir uma falha, que `verification` permite: confirme nas sessoes que `--repo` lista antes de contar a violacao. Regra de um so repositorio fica com `retro-repo`;
+   3. regra de skill do catalogo descumprida em dois repositorios ou mais: `unknown` acima de 50%, contra a regra de pipefail de `verification`, ou `gate rep` acima de 25%, contra a regra de um gate por publicacao. Confirme nas sessoes de `--repo` que o `gate rep` nao e reexecucao depois de falha, que `verification` permite. Regra de um so repositorio fica com `retro-repo`;
    4. skill do catalogo ha mais de 30 dias e sem uso na janela, fora as que so carregam por comando. A data de entrada vem de `git log --follow --diff-filter=A --format=%as -- skills/<nome>/SKILL.md`. Rode `--skill <nome>` no eval: se passam, proponha ao usuario remove-la ou junta-la a uma vizinha; se falham, a causa e acionamento;
    5. nome fora do catalogo que ainda carrega e nao esta em `RENAMED` (`scripts/usage.mts`). Procure o nome no historico do catalogo com `git log --all --stat -- 'skills/<nome>/*' '<nome>/*'`:
       - renomeado para uma skill atual: acrescente-o a `RENAMED` com o nome atual;

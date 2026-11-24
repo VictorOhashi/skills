@@ -338,7 +338,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
     retries,
     ...(previous ? { baseline: previous } : {}),
     ...(values.claude ? { claude: values.claude } : {}),
-    onResult: (result, done) => log(`${String(done).padStart(3)}/${cases.length} ${result.pass ? "pass" : "FAIL"}  ${result.prompt.slice(0, 70)}`),
+    onResult: (result, done) => log(`${done > cases.length ? "rerun  " : `${String(done).padStart(3)}/${cases.length}`} ${result.pass ? "pass" : "FAIL"}  ${result.prompt.slice(0, 70)}`),
   });
   const failed = run.results.some((result) => result.error);
   // A run with errored cases would hide their regressions as the next baseline.

@@ -505,3 +505,26 @@ test("tool err counts failed runs, not denied calls, empty searches or missing p
   ]));
   assert.deepEqual(runs.map((run) => [run.toolCalls, run.toolErrors]), [[4, 1]]);
 });
+
+test("after a store version change, a fork still on disk replaces the stale entry of its deleted original", async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "skills-usage-fork-"));
+  roots.push(tmp);
+  const transcripts = path.join(tmp, "projects");
+  const store = path.join(tmp, "usage");
+  const original = path.join(transcripts, "p", "s1.jsonl");
+  const fork = path.join(transcripts, "q", "s1-fork.jsonl");
+  await mkdir(path.dirname(original), { recursive: true });
+  await mkdir(path.dirname(fork), { recursive: true });
+  const lines = [skillLoad("send", "# Send", "2026-11-01T10:00:00.000Z"), human("não, errado", "2026-11-01T10:01:00.000Z")];
+  await writeFile(original, jsonl(lines));
+  await writeFile(fork, jsonl(lines));
+  await ingestUsage(store, transcripts);
+  await rm(original);
+  const storePath = path.join(store, "usage.json");
+  const { readFile } = await import("node:fs/promises");
+  const current = JSON.parse(await readFile(storePath, "utf8")) as Record<string, unknown>;
+  await writeFile(storePath, JSON.stringify({ ...current, version: 1, files: {} }));
+  const { runs, prompts } = await ingestUsage(store, transcripts);
+  assert.deepEqual(runs.map((run) => [run.file, run.stale]), [[fork, undefined]]);
+  assert.deepEqual(prompts.map((prompt) => [prompt.file, prompt.stale]), [[fork, undefined]]);
+});
