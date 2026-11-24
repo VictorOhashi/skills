@@ -22,6 +22,7 @@ Neste repositorio, o texto comum e o nucleo (`SKILL.md`). O texto de uma harness
 ## Nomes e build
 
 - Em `SKILL.md`, `{{SCRIPTS_DIR}}` vira o caminho absoluto da pasta de scripts compartilhados do build.
+- Ao renomear uma skill, acrescente o nome antigo a `RENAMED` em `scripts/usage.mts`, para o relatorio de uso manter um so historico.
 
 ## Termos fixos
 

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,11 +10,28 @@ export const DEFAULT_STORE = path.join(os.homedir(), ".agents", "usage");
 /** Next to this script in the catalog checkout and in the installed build alike. */
 export const DEFAULT_CATALOG = path.join(path.dirname(import.meta.dirname), "skills");
 
+/** Former catalog names, so a renamed skill keeps one history. Add the old name when renaming a catalog skill. */
+export const RENAMED: Readonly<Record<string, string>> = {
+  "ban-bad-pattern": "ban-bad-patterns",
+  "correct-repo": "retro-repo",
+  "design-guide": "ui-principles",
+  "full-send": "send-full",
+  "github-issue-read": "github-read",
+  mockup: "ui-mockup",
+  "principle-ui-design": "ui-principles",
+  "skill-retro": "retro-skill",
+  "validation-loop": "review-loop",
+};
+
 /** How the next human prompt after a skill turn reads: a correction, anything else, or no prompt at all. */
 export type Reaction = "correction" | "other" | "none";
 
-/** Pointer back to the transcript record, so a retro can read the content locally. */
-type Source = { id: string; sessionId: string; file: string; repo: string; at: string };
+/**
+ * Pointer back to the transcript record, so a retro can read the content locally.
+ * `stale`: kept from a deleted transcript across a store version change, so its classification (reaction, prompt kind,
+ * check outcome, tool errors) may follow older rules. Counts include it; rates that depend on the classification leave it out.
+ */
+type Source = { id: string; sessionId: string; file: string; repo: string; at: string; stale?: true };
 
 /**
  * One skill load. Turn metrics cover the records from the load until the next human prompt,
@@ -63,7 +80,7 @@ export type CheckKind = "preflight" | "push" | "e2e" | "test" | "typecheck" | "l
 /**
  * A verification command and how long it took: from the call to its result, or to the completion notice when it ran
  * in the background. `outcome` is unknown when the command hides the check's exit code: a pipe without `pipefail`,
- * `|| ...`, or another command after `;`. Permission denials, interruptions and superseded runs are not recorded.
+ * `|| ...`, or another command after `;` that does not print `$?`. Permission denials, interruptions and superseded runs are not recorded.
  */
 export type CheckRun = Source & {
   kind: CheckKind;
@@ -85,17 +102,21 @@ export type Usage = {
 
 type Store = Usage & {
   /** Bumped when parsing changes, so the next ingest re-reads every transcript still on disk. */
-  version: 7;
+  version: 13;
   /** Transcript path -> mtime already ingested. */
   files: Record<string, number>;
 };
 
-const STORE_VERSION = 7;
+/** Bump when a classification changes: transcripts still on disk are read again; entries of deleted ones are kept as `stale`. */
+const STORE_VERSION = 13;
 const SKILL_HEADER = "Base directory for this skill: ";
 const INTERRUPT = "[Request interrupted by user";
 const WORKTREE = /\/\.(claude|codex)\/worktrees\/[^/]+/;
 // Accents are stripped before matching, so the Portuguese words carry none.
-const CORRECTION = /^(nao\b|na verdade|errad|incorret|desfaz|desfaca|revert|volta |volte |pare\b|para de|nao era|nao foi isso|wrong\b|undo\b|stop\b)|\b(esta errad|ta errad|nao e isso|nao pedi|voce errou|you broke|not what i)/;
+// On the lowercased prompt without accents. "nao", "para" and "stop" are corrections only as the first word and alone
+// or followed by a few words: "nao esquece de rodar" and "para deploy" are requests.
+const CORRECTION_START = /^(?:(?:nao|nope|no)(?:[,.!;:]|$)|nao (?:era|e isso|foi isso|e assim|e bem isso|e para|e pra|gostei|ficou|(?:tinhamos|haviamos|tinha) (?:fechado|combinado|decidido))|na verdade(?!,? (?:pode|ta|esta|ficou|era) (?:seguir|bom|otimo|certo|assim|isso))|errad|incorret|desfaz|desfaca|revert|volt[ae] (?:como|atras|ao que|pro que|para o que)|(?:pare|para)(?: de\b| com\b|[,.!]|$)|stop(?: doing\b|[,.!]|$)|wrong\b|undo\b|that'?s not\b|deu erro\b)/;
+const CORRECTION_ANY = /\b(?:ainda (?:nao )?(?:esta |ta )?(?:correto|certo|legal|bom|com (?:o |esse |um )?problema)|ainda nao (?:gostei|e (?:o que|oque))|ainda falta|nao (?:ficou|ficaram)\b|ficou diferente|nao (?:apareceu|apareceram|mudou|carregou|carrega)\b|ainda n(?:ao)? foi\b|nao foi feito|continua (?:quebrand|igual|aparecendo|acontecendo)|(?:estou |to )?achando (?:muito|meio|bem) (?:estranh|ruim|feio|confus|lent|pesad|poluid|grande|pequen|apertad|complex|verbos|generic|amador)|notei que (?:\w+ ){0,5}(?:nao|ainda|continua|quebr|sumiu|sumiram|errad|falh)|ficou (?:errad|estranh|ruim|feio|cortad|quebrad|faltando)|nao gostei|nao deveria\b|faltou (?!algo|algum|alguma|nada|oque|o que|pouco)\w+|faltaram\b|incorret|horrivel|(?:esta|ta) quebrad|nao e (?:o que|oque) eu (?:quero|pedi)|esta errad|ta errad|errou\b|nao e isso|nao pedi|nao (?:esta |ta )?funcion|nao (?:esta|ta) (?:legal|bom|certo|correto)|nao deu certo|esqueceu\b(?! (?:algo|algum|alguma|nada))|(?:ta|esta) faltando(?! (?:algo|algum|alguma|nada))|(?:voce|vc) quebrou|quebrou (?:o|a|os|as) (?:build|ci|teste|testes|app|tela|deploy)|tudo errad|(?<!isso que |^como )eu (?:te )?pedi\b|por que (?:voce|vc) (?:fez|mexeu|mudou|apagou|removeu|commitou|rodou|publicou)|faltou (?:o|a|os|as)\b|de novo o mesmo|mesmo erro|continua (?:quebrad|errad|falhand|com erro|dando erro)|ainda (?:esta |ta )?(?:quebrad|errad|falhand|com erro|dando erro)|you broke|not what i|you forgot|forgot to|is wrong|that'?s wrong|didn'?t work|doesn'?t work|not working|still (?:broken|failing)|same error)/;
 const FINDING = /(?:^|\n)[ \t>*-]*R\d+ \[(blocker|should|nit|pre-existing)\] `?([^\s`]+)`?[^\n]*/g;
 const SUBCOMMANDS = new Set(["pnpm", "npm", "yarn", "bun", "npx", "git", "gh", "docker", "make", "cargo", "go", "flutter", "dart", "uv", "pip", "poetry", "kubectl", "terraform", "supabase"]);
 const READ_ONLY = new Set(["cat", "ls", "head", "tail", "grep", "rg", "find", "sed", "awk", "wc", "stat", "file", "tree", "jq", "diff", "git status", "git log", "git show", "git diff", "git rev-parse", "git branch", "git ls-files", "git grep", "git ls-remote"]);
@@ -106,7 +127,7 @@ const PROGRAM = /^[\w.@+-]+$/;
 /** Flags whose next word is their value, so it is not taken for the subcommand. */
 const VALUE_FLAGS = new Set(["--filter", "-F", "-C", "--dir", "--prefix", "--cwd", "--repo", "-R", "--workspace", "-f", "--file", "-p", "--project", "-n", "--namespace", "--context", "-c", "--git-dir", "--work-tree"]);
 /** Programs that run a project's checks; the check kind comes from their arguments. */
-const RUNNERS = new Set(["pnpm", "npm", "yarn", "bun", "bunx", "npx", "turbo", "nx", "node", "tsx", "make", "cargo", "go", "flutter", "dart", "uv", "pytest", "vitest", "jest", "playwright", "tsc", "eslint", "oxlint", "biome", "ruff", "mypy", "pyright", "gradle", "gradlew", "mvn"]);
+const RUNNERS = new Set(["bash", "sh", "python", "python3", "poetry", "pipenv", "hatch", "pnpm", "npm", "yarn", "bun", "bunx", "npx", "turbo", "nx", "node", "tsx", "make", "cargo", "go", "flutter", "dart", "uv", "pytest", "vitest", "jest", "playwright", "tsc", "eslint", "oxlint", "biome", "ruff", "mypy", "pyright", "gradle", "gradlew", "mvn"]);
 /** First match wins, so a step that names several kinds counts as the broadest one. */
 const CHECK_WORDS: Array<[CheckKind, RegExp]> = [
   ["preflight", /\bpreflight\b/],
@@ -120,7 +141,15 @@ const CHECK_WORDS: Array<[CheckKind, RegExp]> = [
 const NOT_CHECKS = new Set(["add", "install", "i", "remove", "rm", "uninstall", "why", "view", "info", "outdated", "update", "up", "link", "unlink", "pip"]);
 const NOT_RUN = new Set<FailureKind>(["blocked", "denied", "rejected", "interrupted", "outside-worktree"]);
 /** Script runners: the check is named by the script file, not by the directories in its path. */
-const SCRIPT_RUNNERS = new Set(["node", "tsx"]);
+const SCRIPT_RUNNERS = new Set(["node", "tsx", "bash", "sh", "python", "python3"]);
+const SCRIPT_FILE = /\.(sh|py|js|mjs|cjs|ts|mts)$/;
+
+/** The words of a script name (`run-tests.sh` → `run tests sh`); none for support files such as `test-utils.mts`. */
+function scriptWords(name: string): string {
+  const words = name.split(/[-_.]/);
+  return words.some((word) => /^(utils?|helpers?|fixtures?|mocks?|setup|data|lib)$/.test(word)) ? "" : words.join(" ");
+}
+
 /** When one command runs several checks, it counts as the one that dominates its time. */
 const CHECK_ORDER: CheckKind[] = ["preflight", "push", "e2e", "test", "typecheck", "lint", "build", "ci-wait"];
 /** Runs longer than this are left out of the times: a stuck process or a delayed completion notice. */
@@ -129,14 +158,14 @@ const NOTICE = /<task-notification>([\s\S]*?)<\/task-notification>/g;
 
 type Line = Record<string, unknown>;
 type OpenRun = Omit<SkillRun, "reaction"> & { messages: Set<string> };
-type OpenCheck = Omit<CheckRun, "seconds" | "outcome"> & { masked: boolean };
+type OpenCheck = Omit<CheckRun, "seconds" | "outcome"> & { masked: boolean; reported: boolean };
 
 export function parseTranscript(file: string, text: string): Usage {
   const usage: Usage = { runs: [], prompts: [], findings: [], failures: [], checks: [] };
   let open: OpenRun[] = [];
   const checks = new Map<string, OpenCheck>();
   const finish = (check: OpenCheck, at: string, failed: boolean, outcome?: CheckRun["outcome"]): void => {
-    const { masked, ...rest } = check;
+    const { masked, reported: _reported, ...rest } = check;
     const seconds = Math.max(0, (Date.parse(at) - Date.parse(check.at)) / 1000);
     usage.checks.push({ ...rest, seconds, outcome: outcome ?? (failed ? "fail" : masked ? "unknown" : "ok") });
     checks.delete(check.id);
@@ -148,6 +177,14 @@ export function parseTranscript(file: string, text: string): Usage {
   let sessionCwd: string | undefined;
   // Subagent transcripts start with the parent's briefing, which is not a human prompt.
   const subagent = file.includes(`${path.sep}subagents${path.sep}`);
+  // A denied, blocked or interrupted call and a read that finds nothing are not errors of the turn.
+  const realError = (block: Line | undefined): boolean => {
+    if (block?.type !== "tool_result" || block.is_error !== true) return false;
+    const kind = failureKind(strings(block.content).join("\n"));
+    const command = typeof block.tool_use_id === "string" ? commands.get(block.tool_use_id) : undefined;
+    const probe = kind === "exit" && command !== undefined && commandSignature(command).split(" && ").every((step) => READ_ONLY.has(step));
+    return !NOT_RUN.has(kind) && kind !== "missing-path" && !probe;
+  };
   const close = (reaction: Reaction): void => {
     for (const { messages: _messages, ...run } of open) usage.runs.push({ ...run, reaction });
     open = [];
@@ -203,6 +240,10 @@ export function parseTranscript(file: string, text: string): Usage {
             if (NOT_RUN.has(kind)) checks.delete(check.id);
             // A missing file may be the check's failure or another step's.
             else finish(check, at, true, kind === "missing-path" || kind === "not-found" ? "unknown" : "fail");
+          } else if (check.masked && check.reported) {
+            // `check; echo "exit $?"` hides the code from the harness but prints it.
+            const code = printedExit(output);
+            finish(check, at, false, code === undefined ? "unknown" : code === 0 ? "ok" : "fail");
           } else finish(check, at, false);
         }
       }
@@ -260,14 +301,14 @@ export function parseTranscript(file: string, text: string): Usage {
     }
     for (const run of open) {
       run.endedAt = at;
-      addMetrics(run, line, blocks);
+      addMetrics(run, line, blocks, realError);
     }
   }
   close("none");
   return usage;
 }
 
-function addMetrics(run: OpenRun, line: Line, blocks: Array<Line | undefined>): void {
+function addMetrics(run: OpenRun, line: Line, blocks: Array<Line | undefined>, realError: (block: Line | undefined) => boolean): void {
   const message = asRecord(line.message);
   if (line.type === "assistant" && message) {
     // Claude Code writes one record per content block, each repeating the message usage.
@@ -279,7 +320,7 @@ function addMetrics(run: OpenRun, line: Line, blocks: Array<Line | undefined>): 
     run.toolCalls += blocks.filter((block) => block?.type === "tool_use").length;
   }
   if (line.type === "user") {
-    run.toolErrors += blocks.filter((block) => block?.type === "tool_result" && block.is_error === true).length;
+    run.toolErrors += blocks.filter(realError).length;
     if (textOf(message?.content).startsWith(INTERRUPT)) run.interrupted = true;
   }
 }
@@ -324,7 +365,7 @@ function humanPrompt(line: Line): string | undefined {
 
 export function isCorrection(prompt: string): boolean {
   const normalized = prompt.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim().slice(0, 300);
-  return CORRECTION.test(normalized);
+  return CORRECTION_START.test(normalized) || CORRECTION_ANY.test(normalized);
 }
 
 export function failureKind(output: string): FailureKind {
@@ -334,13 +375,16 @@ export function failureKind(output: string): FailureKind {
   if (output.startsWith("The user doesn't want to proceed")) return "rejected";
   if (output.startsWith("[Tool call interrupted")) return "interrupted";
   if (/command not found|: not found\b/.test(output)) return "not-found";
-  if (/No such file or directory|ENOENT/.test(output)) return "missing-path";
+  if (/No such file or directory|ENOENT|^(?:<tool_use_error>)?File does not exist/.test(output)) return "missing-path";
   if (/^Command timed out|timed out after/i.test(output)) return "timeout";
   return "exit";
 }
 
-/** Separator after the step (`&&`, `||`, `|`, `|&`, `;`, newline), and whether another step follows. */
-type Step = { program: string; args: string[]; next: string | undefined; last: boolean; orAfter: boolean };
+/**
+ * Separator after the step (`&&`, `||`, `|`, `|&`, `;`, newline), and whether another step follows.
+ * `after` is the raw text of the step that follows, kept before trivial steps such as `echo` are dropped.
+ */
+type Step = { program: string; args: string[]; next: string | undefined; after: string; last: boolean; orAfter: boolean };
 
 /** The shell text with heredoc bodies and quoted text replaced, since they are data. */
 function shellText(command: string): string {
@@ -352,7 +396,8 @@ function shellText(command: string): string {
       return { lines: [...state.lines, line], heredoc: marker?.[1] };
     }, { lines: [], heredoc: undefined })
     .lines.join("\n")
-    .replace(/'[^']*'|"(?:[^"\\]|\\.)*"|\$\([^)]*\)/g, "x");
+    // `$?` survives inside quotes: `echo "exit $?"` still prints the code of the step before it.
+    .replace(/'[^']*'|"(?:[^"\\]|\\.)*"|\$\([^)]*\)/g, (quoted) => (quoted.startsWith('"') && quoted.includes("$?") ? "x$?" : "x"));
 }
 
 /** The simple commands of a shell line; `last` is set before trivial commands are dropped, since `echo` and the like set the exit status too. */
@@ -361,11 +406,13 @@ function shellSteps(command: string): Step[] {
   const steps: Step[] = [];
   for (let index = 0; index < parts.length; index += 2) {
     const words = (parts[index] ?? "").trim().split(/\s+/).filter(Boolean);
+    // `(pnpm preflight; echo $?)`: a subshell opens on the program's own word.
+    if (words[0] && words[0].length > 1 && words[0].startsWith("(")) words[0] = words[0].replace(/^\(+/, "");
     while (words[0] && (/^\w+=/.test(words[0]) || PREFIXES.has(words[0]))) {
       // `timeout 600 pnpm test`: the duration and the flags before it are not the program.
       if (words.shift() === "timeout") while (words[0] && (words[0].startsWith("-") || /^\d/.test(words[0]))) words.shift();
     }
-    if (words[0]) steps.push({ program: path.basename(words[0]), args: words.slice(1), next: parts[index + 1], last: false, orAfter: false });
+    if (words[0]) steps.push({ program: path.basename(words[0]), args: words.slice(1), next: parts[index + 1], after: parts[index + 2] ?? "", last: false, orAfter: false });
   }
   const final = steps.at(-1);
   if (final) final.last = true;
@@ -389,26 +436,50 @@ export function commandSignature(command: string): string {
   return steps.slice(0, 4).join(" && ") || "(shell)";
 }
 
-/** The verification a command runs, if any, and whether the command hides that step's exit code. */
-export function checkOf(command: string): { kind: CheckKind; masked: boolean; pushes: boolean } | undefined {
+/** The exit code a command printed itself (`echo "exit $?"`, `EXIT=1`, `rc: 0`), from the last line that names one. */
+export function printedExit(output: string): number | undefined {
+  const lines = output.trimEnd().split("\n").map((line) => line.trim());
+  // A bare `echo $?` prints only the number, and only as the last line.
+  const bare = /^(\d{1,3})$/.exec(lines.at(-1) ?? "");
+  if (bare) return Number(bare[1]);
+  for (const line of lines.reverse()) {
+    const match = /\b(?:exit(?:[ _-]?code)?|status|rc|code)\b\s*[:=]?\s*(\d{1,3})$/i.exec(line);
+    if (match) return Number(match[1]);
+  }
+  return undefined;
+}
+
+/**
+ * The verification a command runs, if any; whether the command hides that step's exit code from the harness,
+ * and whether it prints the code (`$?`, `PIPESTATUS`) so the output still tells the outcome.
+ */
+export function checkOf(command: string): { kind: CheckKind; masked: boolean; reported: boolean; pushes: boolean } | undefined {
   const shell = shellText(command);
   const pipefail = /\bset\s+-\w*o\s+pipefail\b/.test(shell);
   const errexit = /\bset\s+-\w*e/.test(shell);
-  let found: { kind: CheckKind; masked: boolean } | undefined;
+  let found: { kind: CheckKind; masked: boolean; reported: boolean } | undefined;
   let pushes = false;
-  for (const { program, args, next, last, orAfter } of shellSteps(command)) {
+  for (const { program, args, next, after, last, orAfter } of shellSteps(command)) {
     // Flag values (`--filter test-kit`) name targets, not the check.
     const words = args.filter((word, index) => !word.startsWith("-") && !VALUE_FLAGS.has(args[index - 1] ?? ""));
-    const text = SCRIPT_RUNNERS.has(program) ? path.basename(words[0] ?? "") : words.join(" ");
+    const script = path.basename(words[0] ?? "");
+    // `python manage.py test`: Django names the check after the script.
+    const text = SCRIPT_RUNNERS.has(program) ? scriptWords(script) + (script === "manage.py" ? ` ${words[1] ?? ""}` : "") : words.join(" ");
+    const runsScript = SCRIPT_FILE.test(program);
     let kind: CheckKind | undefined;
     if (program === "git" && subcommand(args) === "push") kind = "push", pushes = true;
-    else if ((program === "gh" && /^(pr checks|run watch)/.test(text) && (args.includes("--watch") || text.startsWith("run watch"))) || (/\bpr-state\.mts\b/.test(text) && args.includes("--wait"))) kind = "ci-wait";
-    else if (SCRIPT_RUNNERS.has(program) && args.includes("--test")) kind = "test";
+    else if ((program === "gh" && /^(pr checks|run watch)/.test(text) && (args.includes("--watch") || text.startsWith("run watch"))) || (script === "pr-state.mts" && args.includes("--wait"))) kind = "ci-wait";
+    else if ((program === "node" || program === "tsx") && args.includes("--test")) kind = "test";
     else if (NOT_CHECKS.has(subcommand(args) ?? "") || /\bplaywright (install|show-report|codegen)\b/.test(text)) kind = undefined;
-    else if (RUNNERS.has(program) || /preflight/.test(program)) kind = CHECK_WORDS.find(([, pattern]) => pattern.test(`${program} ${text}`))?.[0];
+    else if (RUNNERS.has(program) || runsScript) {
+      const subject = runsScript ? scriptWords(program) : `${program} ${text}`;
+      kind = CHECK_WORDS.find(([, pattern]) => pattern.test(subject))?.[0];
+    }
     if (!kind || (found && CHECK_ORDER.indexOf(kind) >= CHECK_ORDER.indexOf(found.kind))) continue;
     const masked = next === "||" || orAfter || ((next === "|" || next === "|&") && !pipefail) || ((next === ";" || next === "\n") && !last && !errexit);
-    found = { kind, masked };
+    // `$?` after `check;` is the check's code; after `check | tail;` it is tail's, unless PIPESTATUS keeps it.
+    const reported = masked && (((next === ";" || next === "\n") && !orAfter && /\$\?/.test(after)) || /\$\{?PIPESTATUS/.test(command));
+    found = { kind, masked, reported };
   }
   return found && { ...found, pushes };
 }
@@ -438,9 +509,40 @@ function findingPath(raw: string, cwd: unknown): string {
   return value;
 }
 
+const checkouts = new Map<string, string>();
+
+/** Main checkout of the folder; when the folder is gone, its name without a `.claude`/`.codex` worktree suffix. */
 function repoName(cwd: unknown): string {
   if (typeof cwd !== "string" || !cwd) return "(unknown)";
-  return path.basename(cwd.replace(new RegExp(`${WORKTREE.source}.*`), ""));
+  let name = checkouts.get(cwd);
+  if (name === undefined) {
+    name = checkoutName(cwd) ?? path.basename(cwd.replace(new RegExp(`${WORKTREE.source}.*`), ""));
+    checkouts.set(cwd, name);
+  }
+  return name;
+}
+
+/** The nearest Git checkout above `cwd`; a linked worktree's `.git` file points into the main checkout's `.git`. */
+function checkoutName(cwd: string): string | undefined {
+  for (let dir = cwd; ; dir = path.dirname(dir)) {
+    const dotGit = path.join(dir, ".git");
+    const stats = (() => {
+      try {
+        return statSync(dotGit);
+      } catch {
+        return undefined;
+      }
+    })();
+    if (stats?.isDirectory()) return path.basename(dir);
+    if (stats?.isFile()) {
+      const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1]?.trim() ?? "";
+      const target = path.resolve(dir, gitdir);
+      const worktree = /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(target)?.[1];
+      const module = /[\\/]\.git[\\/]modules[\\/](.+?)[\\/]worktrees[\\/][^\\/]+$/.exec(target)?.[1];
+      return path.basename(worktree ?? module ?? dir);
+    }
+    if (path.dirname(dir) === dir) return undefined;
+  }
 }
 
 function textOf(content: unknown): string {
@@ -493,8 +595,10 @@ export async function ingestUsage(storeDir: string, transcriptsRoot: string): Pr
     store.files[file] = info.mtimeMs;
   }
   if (changed.size === 0) return store;
+  // A current copy of a record (a fork still on disk) replaces the stale entry of its deleted original.
   const merge = <T extends Source>(kept: T[], pick: (usage: Usage) => T[], keepLater: (a: T, b: T) => boolean): T[] =>
-    dedupe([...kept.filter((entry) => !changed.has(entry.file)), ...[...changed.values()].flatMap(pick)], keepLater);
+    dedupe([...kept.filter((entry) => !changed.has(entry.file)), ...[...changed.values()].flatMap(pick)],
+      (a, b) => (b.stale === true && a.stale !== true) || (a.stale === b.stale && keepLater(a, b)));
   store.runs = merge(store.runs, (usage) => usage.runs, (a, b) => a.endedAt > b.endedAt);
   store.prompts = merge(store.prompts, (usage) => usage.prompts, () => false);
   store.findings = merge(store.findings, (usage) => usage.findings, (a, b) => a.at < b.at);
@@ -529,7 +633,7 @@ async function loadStore(storePath: string): Promise<Store> {
   for (const key of ["runs", "prompts", "findings", "failures", "checks"] as const) {
     const entries = Array.isArray(raw[key]) ? (raw[key] as Source[]) : [];
     const kept: Source[] = [];
-    for (const entry of entries) if (typeof entry?.file === "string" && (await gone(entry))) kept.push(entry);
+    for (const entry of entries) if (typeof entry?.file === "string" && (await gone(entry))) kept.push({ ...entry, stale: true });
     (store[key] as Source[]) = kept;
   }
   return store;
@@ -571,14 +675,26 @@ export type SkillStats = {
   interruptRate: number;
   /** Turns whose next human prompt reads as a correction, over turns with a next prompt. */
   correctionRate: number;
+  /** Runs from deleted transcripts: counted, but left out of `toolErrorRate` and `correctionRate`. */
+  staleRuns: number;
   lastUsed: string;
 };
 
-export type VersionStats = Omit<SkillStats, "skill" | "inCatalog" | "versions"> & { version: string; firstUsed: string };
+/** Check signals of a version cover the sessions where it loaded, so a rule about checks shows up per version. */
+export type VersionStats = Omit<SkillStats, "skill" | "inCatalog" | "versions"> & {
+  version: string;
+  firstUsed: string;
+  checks: number;
+  /** Mean over sessions with checks other than pushes and CI waits, stale ones left out; undefined without any. */
+  unknownRate: number | undefined;
+  repeatedGate: number | undefined;
+};
 
 export type RepoStats = {
   repo: string;
   sessions: number;
+  /** Sessions whose transcript was deleted: counted, but left out of the classification rates. */
+  staleSessions: number;
   prompts: number;
   correctionRate: number;
   interrupts: number;
@@ -588,6 +704,9 @@ export type RepoStats = {
   failures: number;
   /** Time spent in verification commands (checks, pushes, CI waits). */
   checkHours: number;
+  /** Checks other than pushes and CI waits whose command hides the exit code. */
+  unknownRate: number;
+  repeatedGate: number | undefined;
   lastActive: string;
 };
 
@@ -600,11 +719,13 @@ export type CheckStats = {
   sessions: number;
   /** Time stats leave out `late` runs: longer than an hour, a stuck process or a delayed notice. */
   late: number;
+  /** Runs from deleted transcripts, left out of `failRate` and `unknownRate`. */
+  stale: number;
   medianSeconds: number;
   p90Seconds: number;
   totalHours: number;
   failRate: number;
-  /** Runs whose command hides the exit code (pipe without pipefail, `|| ...`, a command after `;`): their failures do not show. */
+  /** Runs whose command hides the exit code (pipe without pipefail, `|| ...`, a command after `;` that does not print `$?`): their failures do not show. */
   unknownRate: number;
   /** Runs of this kind per session that ran it. */
   medianPerSession: number;
@@ -614,6 +735,11 @@ export type CheckStats = {
 export function since<T extends Source>(entries: T[], from: Date): T[] {
   const iso = from.toISOString();
   return entries.filter((entry) => entry.at >= iso);
+}
+
+/** Runs under the current name of a renamed catalog skill. */
+export function canonicalRuns(runs: SkillRun[]): SkillRun[] {
+  return runs.map((run) => (RENAMED[run.skill] ? { ...run, skill: RENAMED[run.skill] as string } : run));
 }
 
 export function skillReport(runs: SkillRun[], catalog: string[]): { skills: SkillStats[]; unused: string[] } {
@@ -628,15 +754,56 @@ export function skillReport(runs: SkillRun[], catalog: string[]): { skills: Skil
   return { skills, unused: catalog.filter((name) => !bySkill.has(name)).sort() };
 }
 
-export function versionReport(runs: SkillRun[], skill: string): VersionStats[] {
+export function versionReport(runs: SkillRun[], skill: string, checks: CheckRun[] = []): VersionStats[] {
   return [...groupBy(runs.filter((run) => run.skill === skill), (run) => run.version)]
-    .map(([version, group]) => ({ version, ...runMetrics(group), firstUsed: group[0]?.at ?? "" }))
+    .map(([version, group]) => {
+      const own = checksAfterLoad(runs.filter((run) => run.skill === skill), version, checks);
+      const eligible = own.filter((entry) => entry.kind !== "push" && entry.kind !== "ci-wait" && !entry.stale);
+      const bySession = [...groupBy(eligible, (entry) => entry.sessionId).values()].map(unknownRate);
+      return {
+        version, ...runMetrics(group), firstUsed: group[0]?.at ?? "", checks: own.length,
+        // Mean of the session rates, so one long session does not decide the version.
+        unknownRate: bySession.length === 0 ? undefined : sum(bySession) / bySession.length,
+        repeatedGate: repeatedGateRate(own),
+      };
+    })
     .sort((a, b) => a.firstUsed.localeCompare(b.firstUsed));
 }
 
+/** Checks of each session from the first load of `version` until a load of another version of the same skill. */
+function checksAfterLoad(skillRuns: SkillRun[], version: string, checks: CheckRun[]): CheckRun[] {
+  const windows = new Map<string, Array<[string, string]>>();
+  for (const [sessionId, loads] of groupBy(skillRuns, (run) => run.sessionId)) {
+    const sorted = [...loads].sort((a, b) => a.at.localeCompare(b.at));
+    sorted.forEach((run, index) => {
+      if (run.version !== version) return;
+      const end = sorted.slice(index + 1).find((later) => later.version !== version)?.at ?? "\uffff";
+      windows.set(sessionId, [...(windows.get(sessionId) ?? []), [run.at, end]]);
+    });
+  }
+  return checks.filter((entry) => windows.get(entry.sessionId)?.some(([from, to]) => entry.at >= from && entry.at < to));
+}
+
+/** Checks other than pushes and CI waits whose command hides the exit code. */
+function unknownRate(checks: CheckRun[]): number {
+  return rate(checks.filter((entry) => entry.kind !== "push" && entry.kind !== "ci-wait" && !entry.stale), (entry) => entry.outcome === "unknown");
+}
+
+/**
+ * Sessions that ran the local gate (`preflight`) more times than they pushed, over sessions that pushed and ran it:
+ * `verification` asks for one gate per publication. Undefined without such sessions.
+ */
+export function repeatedGateRate(checks: CheckRun[]): number | undefined {
+  const sessions = [...groupBy(checks, (entry) => entry.sessionId).values()]
+    .map((group) => ({ gates: group.filter((entry) => entry.kind === "preflight").length, pushes: group.filter((entry) => entry.kind === "push" || entry.pushes).length }))
+    .filter((session) => session.gates > 0 && session.pushes > 0);
+  return sessions.length === 0 ? undefined : rate(sessions, (session) => session.gates > session.pushes);
+}
+
 function runMetrics(group: SkillRun[]) {
-  const toolCalls = sum(group.map((run) => run.toolCalls));
-  const reacted = group.filter((run) => run.reaction !== "none");
+  const current = group.filter((run) => !run.stale);
+  const toolCalls = sum(current.map((run) => run.toolCalls));
+  const reacted = group.filter((run) => run.reaction !== "none" && !run.stale);
   return {
     runs: group.length,
     userRuns: group.filter((run) => run.trigger === "user").length,
@@ -644,9 +811,10 @@ function runMetrics(group: SkillRun[]) {
     repos: new Set(group.map((run) => run.repo)).size,
     medianSeconds: median(group.map((run) => (Date.parse(run.endedAt) - Date.parse(run.at)) / 1000)),
     medianOutputTokens: median(group.map((run) => run.outputTokens)),
-    toolErrorRate: toolCalls === 0 ? 0 : sum(group.map((run) => run.toolErrors)) / toolCalls,
+    toolErrorRate: toolCalls === 0 ? 0 : sum(current.map((run) => run.toolErrors)) / toolCalls,
     interruptRate: group.filter((run) => run.interrupted).length / group.length,
     correctionRate: reacted.length === 0 ? 0 : reacted.filter((run) => run.reaction === "correction").length / reacted.length,
+    staleRuns: group.length - current.length,
     lastUsed: group.reduce((last, run) => (run.at > last ? run.at : last), ""),
   };
 }
@@ -665,13 +833,16 @@ export function repoReport(usage: Usage): RepoStats[] {
       return {
         repo,
         sessions: new Set(all.map((entry) => entry.sessionId)).size,
+        staleSessions: new Set(all.filter((entry) => entry.stale).map((entry) => entry.sessionId)).size,
         prompts: typed.length,
-        correctionRate: typed.length === 0 ? 0 : typed.filter((entry) => entry.kind === "correction").length / typed.length,
+        correctionRate: rate(typed.filter((entry) => !entry.stale), (entry) => entry.kind === "correction"),
         interrupts: prompts.length - typed.length,
         blockers: findings.filter((entry) => entry.severity === "blocker").length,
         shoulds: findings.filter((entry) => entry.severity === "should").length,
         failures: realFailures.length,
         checkHours: sum(checks.map((entry) => entry.seconds).filter((value) => value <= LATE_SECONDS)) / 3600,
+        unknownRate: unknownRate(checks),
+        repeatedGate: repeatedGateRate(checks),
         lastActive: all.reduce((last, entry) => (entry.at > last ? entry.at : last), ""),
       };
     })
@@ -709,7 +880,7 @@ export function failureReport(failures: CommandFailure[]): FailureStats[] {
     .sort((a, b) => b.sessions - a.sessions || b.count - a.count);
 }
 
-export type SessionChecks = { file: string; kind: CheckKind; runs: number; pushes: number; last: string };
+export type SessionChecks = { file: string; kind: CheckKind; runs: number; pushes: number; last: string; stale: boolean };
 
 /** Sessions that ran `kind` most, with their pushes: more runs than pushes means the gate ran again before publishing. */
 export function busiestSessions(checks: CheckRun[], kind: CheckKind, limit = 10): SessionChecks[] {
@@ -720,6 +891,7 @@ export function busiestSessions(checks: CheckRun[], kind: CheckKind, limit = 10)
       runs: group.filter((entry) => entry.kind === kind).length,
       pushes: group.filter((entry) => entry.kind === "push" || entry.pushes).length,
       last: group.at(-1)?.at ?? "",
+      stale: group.some((entry) => entry.stale),
     }))
     .filter((session) => session.runs > 0)
     .sort((a, b) => b.runs - b.pushes - (a.runs - a.pushes) || b.runs - a.runs)
@@ -737,11 +909,12 @@ export function checkReport(checks: CheckRun[]): CheckStats[] {
         background: group.filter((entry) => entry.background).length,
         sessions: perSession.length,
         late: group.length - seconds.length,
+        stale: group.filter((entry) => entry.stale).length,
         medianSeconds: median(seconds),
         p90Seconds: percentile(seconds, 0.9),
         totalHours: sum(seconds) / 3600,
-        failRate: group.filter((entry) => entry.outcome === "fail").length / group.length,
-        unknownRate: group.filter((entry) => entry.outcome === "unknown").length / group.length,
+        failRate: rate(group.filter((entry) => !entry.stale), (entry) => entry.outcome === "fail"),
+        unknownRate: rate(group.filter((entry) => !entry.stale), (entry) => entry.outcome === "unknown"),
         medianPerSession: median(perSession),
         p90PerSession: percentile(perSession, 0.9),
       };
@@ -749,12 +922,12 @@ export function checkReport(checks: CheckRun[]): CheckStats[] {
     .sort((a, b) => b.totalHours - a.totalHours);
 }
 
-export function parseSince(value: string | undefined, now = new Date()): Date {
+export function parseSince(value: string | undefined, now = new Date(), option = "--since"): Date {
   const raw = value ?? "30d";
   const match = /^(\d+)d$/.exec(raw);
   if (match) return new Date(now.getTime() - Number(match[1]) * 86_400_000);
   const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) throw new Error(`Invalid --since: ${raw}. Use <days>d or an ISO date`);
+  if (Number.isNaN(date.getTime())) throw new Error(`Invalid ${option}: ${raw}. Use <days>d or an ISO date`);
   return date;
 }
 
@@ -766,6 +939,8 @@ export function table(header: string[], rows: string[][]): string[] {
 }
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
+const optionalPercent = (value: number | undefined): string => (value === undefined ? "-" : percent(value));
+const rate = <T,>(items: T[], hit: (item: T) => boolean): number => (items.length === 0 ? 0 : items.filter(hit).length / items.length);
 const day = (iso: string): string => iso.slice(0, 10);
 
 function median(values: number[]): number {
@@ -796,17 +971,55 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
   return groups;
 }
 
-async function catalogNames(dir: string): Promise<string[]> {
+/** Catalog skill names; `commandOnly` are the `disable-model-invocation` ones, which load only when the user asks. */
+async function catalogNames(dir: string): Promise<{ names: string[]; commandOnly: string[] }> {
   const names: string[] = [];
+  const commandOnly: string[] = [];
   for (const entry of (await readdir(dir, { withFileTypes: true }).catch(ignoreMissing)) ?? []) {
-    if (entry.isDirectory() && (await stat(path.join(dir, entry.name, "SKILL.md")).then(() => true, () => false))) names.push(entry.name);
+    if (!entry.isDirectory()) continue;
+    const text = await readFile(path.join(dir, entry.name, "SKILL.md"), "utf8").catch(ignoreMissing);
+    if (text === undefined) continue;
+    names.push(entry.name);
+    if (/^disable-model-invocation:\s*true\s*$/m.test(/^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "")) commandOnly.push(entry.name);
   }
-  return names.sort();
+  return { names: names.sort(), commandOnly: commandOnly.sort() };
+}
+
+/**
+ * The turn of a skill load as short text lines: the human prompt before it, then from the load to the next
+ * human prompt, where the signals are measured. A retro reads this instead of a whole transcript.
+ */
+export function turnOf(text: string, recordId: string, width = 400): string[] {
+  const lines = text.split("\n").map(parseLine).filter((line): line is Line => line !== undefined);
+  const load = lines.findIndex((line) => line.uuid === recordId);
+  if (load === -1) throw new Error(`No record ${recordId} in the transcript`);
+  const isHuman = (line: Line): boolean => humanPrompt(line) !== undefined && line.isSidechain !== true;
+  let start = load;
+  while (start > 0 && !isHuman(lines[start] as Line)) start -= 1;
+  let end = load + 1;
+  while (end < lines.length && !isHuman(lines[end] as Line)) end += 1;
+  const out: string[] = [];
+  const skipped = lines.slice(start + 1, load).filter((line) => line.type === "assistant").length;
+  for (const line of [lines[start] as Line, ...lines.slice(load, end + 1)]) {
+    if (line.uuid === recordId && skipped > 0) out.push(`... ${skipped} assistant records before the load`);
+    const at = typeof line.timestamp === "string" ? line.timestamp.slice(11, 19) : "";
+    const message = asRecord(line.message);
+    const clip = (value: string): string => value.replace(/\s+/g, " ").trim().slice(0, width);
+    if (isHuman(line)) out.push(`${at} user: ${clip(humanPrompt(line) ?? "")}`);
+    else if (line.uuid === recordId) out.push(`${at} skill loaded: ${clip(textOf(message?.content).split("\n")[0] ?? "")}`);
+    else for (const block of Array.isArray(message?.content) ? message.content.map(asRecord) : []) {
+      if (block?.type === "text" && line.type === "assistant") out.push(`${at} assistant: ${clip(String(block.text ?? ""))}`);
+      if (block?.type === "tool_use") out.push(`${at} tool ${String(block.name)}: ${clip(JSON.stringify(block.input ?? {}))}`);
+      if (block?.type === "tool_result" && block.is_error === true) out.push(`${at} tool error: ${clip(strings(block.content).join(" "))}`);
+    }
+  }
+  return out;
 }
 
 const USAGE = `Usage:
-  usage.mts skills [--skill <name>] [--since 30d] [--json]
-  usage.mts repos [--repo <name>] [--since 30d] [--json]
+  usage.mts skills [--skill <name>] [--since 30d] [--until <date>] [--json]
+  usage.mts repos [--repo <name>] [--since 30d] [--until <date>] [--json]
+  usage.mts turn <transcript> <record id>
 Options: --transcripts <dir> (default ~/.claude/projects), --store <dir> (default ~/.agents/usage), --catalog <skills dir>`;
 
 export async function main(argv: string[], print: (line: string) => void = console.log): Promise<number> {
@@ -817,6 +1030,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
       skill: { type: "string" },
       repo: { type: "string" },
       since: { type: "string" },
+      until: { type: "string" },
       json: { type: "boolean" },
       transcripts: { type: "string" },
       store: { type: "string" },
@@ -824,41 +1038,62 @@ export async function main(argv: string[], print: (line: string) => void = conso
     },
   });
   const [command, ...rest] = positionals;
+  if (command === "turn" && rest.length === 2) {
+    for (const line of turnOf(await readFile(rest[0] as string, "utf8"), rest[1] as string)) print(line);
+    return 0;
+  }
   if ((command !== "skills" && command !== "repos") || rest.length > 0) throw new Error(USAGE);
   const all = await ingestUsage(values.store ?? DEFAULT_STORE, values.transcripts ?? DEFAULT_TRANSCRIPTS);
   const from = parseSince(values.since);
-  const usage: Usage = { runs: since(all.runs, from), prompts: since(all.prompts, from), findings: since(all.findings, from), failures: since(all.failures, from), checks: since(all.checks, from) };
+  const to = values.until === undefined ? undefined : parseSince(values.until, new Date(), "--until");
+  const window = <T extends Source>(entries: T[]): T[] => since(entries, from).filter((entry) => to === undefined || entry.at < to.toISOString());
+  const usage: Usage = { runs: canonicalRuns(window(all.runs)), prompts: window(all.prompts), findings: window(all.findings), failures: window(all.failures), checks: window(all.checks) };
   const emit = (value: unknown, lines: () => string[]): number => {
     if (values.json) print(JSON.stringify(value, null, 2));
     else for (const line of lines()) print(line);
     return 0;
   };
 
+  const span = `since ${day(from.toISOString())}${to ? ` until ${day(to.toISOString())}` : ""}`;
+  /** A classification rate over stale entries only has no data: print `-`, not 0%. */
+  const fresh = (value: number, total: number, stale: number): string => (total > 0 && stale === total ? "-" : percent(value));
+  /** Stale entries point at a deleted transcript: `turn` cannot read them. */
+  const mark = (entry: Source): string => (entry.stale ? "  stale" : "");
+
   if (command === "skills" && values.skill) {
     const skill = values.skill;
-    const versions = versionReport(usage.runs, skill);
+    const versions = versionReport(usage.runs, skill, usage.checks);
+    const all = versionReport(usage.runs.map((run) => (run.skill === skill ? { ...run, version: "all" } : run)), skill, usage.checks);
     const recent = usage.runs.filter((run) => run.skill === skill).slice(-20).reverse();
-    return emit({ skill, since: from.toISOString(), versions, recent }, () => [
-      `${skill}: ${versions.length} versions since ${day(from.toISOString())}`,
-      ...table(["version", "first", "last", "runs", "turn s", "turn out", "tool err", "interr", "correct"], versions.map((stats) => [
-        stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(Math.round(stats.medianSeconds)),
-        String(Math.round(stats.medianOutputTokens)), percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate),
-      ])),
-      "recent runs (repo, reaction, transcript):",
-      ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}`),
+    return emit({ skill, since: from.toISOString(), until: to?.toISOString(), versions, all: all[0], recent }, () => [
+      `${skill}: ${versions.length} versions ${span}`,
+      ...table(["version", "first", "last", "runs", "stale", "turn s", "turn out", "tool err", "interr", "correct", "checks", "unknown", "gate rep"],
+        versions.concat(all).map((stats) => [
+          stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(stats.staleRuns), String(Math.round(stats.medianSeconds)),
+          String(Math.round(stats.medianOutputTokens)), fresh(stats.toolErrorRate, stats.runs, stats.staleRuns), percent(stats.interruptRate),
+          fresh(stats.correctionRate, stats.runs, stats.staleRuns),
+          String(stats.checks), optionalPercent(stats.unknownRate), optionalPercent(stats.repeatedGate),
+        ])),
+      "stale: runs from deleted transcripts, left out of tool err and correct; checks, unknown and gate rep: checks from the version's load until another version loads; unknown is the mean of the session rates",
+      "recent runs (repo, reaction, transcript, record of the load):",
+      ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}  ${run.id}${mark(run)}`),
     ]);
   }
   if (command === "skills") {
-    const report = skillReport(usage.runs, await catalogNames(values.catalog ?? DEFAULT_CATALOG));
-    return emit({ since: from.toISOString(), ...report }, () => [
-      `since ${day(from.toISOString())}: ${usage.runs.length} skill runs`,
-      ...table(["skill", "runs", "user", "sess", "repos", "vers", "turn s", "turn out", "tool err", "interr", "correct", "last"], report.skills.map((stats) => [
-        stats.inCatalog ? stats.skill : `${stats.skill} *`, String(stats.runs), String(stats.userRuns), String(stats.sessions), String(stats.repos),
+    const catalog = await catalogNames(values.catalog ?? DEFAULT_CATALOG);
+    const report = skillReport(usage.runs, catalog.names);
+    const unused = report.unused.filter((name) => !catalog.commandOnly.includes(name));
+    const unusedCommands = report.unused.filter((name) => catalog.commandOnly.includes(name));
+    return emit({ since: from.toISOString(), until: to?.toISOString(), skills: report.skills, unused, unusedCommands }, () => [
+      `${span}: ${usage.runs.length} skill runs`,
+      ...table(["skill", "runs", "stale", "user", "sess", "repos", "vers", "turn s", "turn out", "tool err", "interr", "correct", "last"], report.skills.map((stats) => [
+        stats.inCatalog ? stats.skill : `${stats.skill} *`, String(stats.runs), String(stats.staleRuns), String(stats.userRuns), String(stats.sessions), String(stats.repos),
         String(stats.versions), String(Math.round(stats.medianSeconds)), String(Math.round(stats.medianOutputTokens)),
-        percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate), day(stats.lastUsed),
+        fresh(stats.toolErrorRate, stats.runs, stats.staleRuns), percent(stats.interruptRate), fresh(stats.correctionRate, stats.runs, stats.staleRuns), day(stats.lastUsed),
       ])),
       ...(report.skills.some((stats) => !stats.inCatalog) ? ["* not in the catalog: bundled, plugin or retired skill"] : []),
-      ...(report.unused.length > 0 ? [`unused catalog skills: ${report.unused.join(", ")}`] : []),
+      ...(unused.length > 0 ? [`unused catalog skills: ${unused.join(", ")}`] : []),
+      ...(unusedCommands.length > 0 ? [`unused, load only by command: ${unusedCommands.join(", ")}`] : []),
     ]);
   }
   if (values.repo) {
@@ -871,40 +1106,40 @@ export async function main(argv: string[], print: (line: string) => void = conso
     const findings = only(usage.findings).filter((entry) => entry.severity === "blocker" || entry.severity === "should").slice(-15).reverse();
     const recentFailures = only(usage.failures).filter((entry) => entry.kind !== "probe").slice(-15).reverse();
     const checks = checkReport(only(usage.checks));
-    const gate = checks.find((stats) => stats.kind !== "push" && stats.kind !== "ci-wait")?.kind;
+    const gate = checks.some((stats) => stats.kind === "preflight") ? "preflight" : undefined;
     const busiest = gate ? busiestSessions(only(usage.checks), gate) : [];
     const slowest = only(usage.checks).filter((entry) => entry.seconds <= LATE_SECONDS).sort((a, b) => b.seconds - a.seconds).slice(0, 10);
-    return emit({ repo, since: from.toISOString(), checks, busiest, slowest, areas, failures, corrections, findings, recentFailures }, () => [
-      `${repo} since ${day(from.toISOString())}`,
+    return emit({ repo, since: from.toISOString(), until: to?.toISOString(), checks, busiest, slowest, areas, failures, corrections, findings, recentFailures }, () => [
+      `${repo} ${span}`,
       "verification time (checks, pushes, CI waits):",
       ...table(["kind", "runs", "bg", "late", "sess", "p50 s", "p90 s", "total h", "fail", "unknown", "per sess p50", "p90"], checks.map((stats) => [
         stats.kind, String(stats.runs), String(stats.background), String(stats.late), String(stats.sessions), String(Math.round(stats.medianSeconds)), String(Math.round(stats.p90Seconds)),
-        stats.totalHours.toFixed(1), percent(stats.failRate), percent(stats.unknownRate), String(stats.medianPerSession), String(stats.p90PerSession),
+        stats.totalHours.toFixed(1), fresh(stats.failRate, stats.runs, stats.stale), fresh(stats.unknownRate, stats.runs, stats.stale), String(stats.medianPerSession), String(stats.p90PerSession),
       ])),
-      ...(checks.some((stats) => stats.unknownRate > 0) ? ["unknown: the command hides the exit code (pipe without pipefail, `|| ...`, a command after `;`), so a failure would not show"] : []),
+      ...(checks.some((stats) => stats.unknownRate > 0) ? ["unknown: the command hides the exit code (pipe without pipefail, `|| ...`, a command after `;` that does not print `$?`), so a failure would not show"] : []),
       ...(checks.some((stats) => stats.late > 0) ? ["late: over an hour, left out of the times (stuck process or delayed notice)"] : []),
       "review findings by area (blocker and should):",
       ...table(["area", "blocker", "should", "sess", "last"], areas.slice(0, 15).map((stats) => [stats.area, String(stats.blockers), String(stats.shoulds), String(stats.sessions), day(stats.last)])),
       `failed commands (${sum(probes.map((stats) => stats.count))} failed reads left out; see --json):`,
       ...table(["kind", "command", "count", "sess", "last"], failures.filter((stats) => stats.kind !== "probe").slice(0, 15).map((stats) => [stats.kind, stats.command, String(stats.count), String(stats.sessions), day(stats.last)])),
       "recent corrections (transcript, record):",
-      ...corrections.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.file}  ${entry.id}`),
+      ...corrections.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.file}  ${entry.id}${mark(entry)}`),
       "recent blocker and should findings (transcript):",
-      ...findings.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.severity}  ${entry.path}  ${entry.file}`),
+      ...findings.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.severity}  ${entry.path}  ${entry.file}${mark(entry)}`),
       "recent failed commands (transcript, tool call):",
-      ...recentFailures.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${entry.command}  ${entry.file}  ${entry.id}`),
+      ...recentFailures.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${entry.command}  ${entry.file}  ${entry.id}${mark(entry)}`),
       ...(gate ? [`sessions that ran ${gate} most (runs, pushes, transcript):`] : []),
-      ...busiest.map((session) => `  ${session.last.slice(0, 16)}  ${session.runs}  ${session.pushes}  ${session.file}`),
+      ...busiest.map((session) => `  ${session.last.slice(0, 16)}  ${session.runs}  ${session.pushes}  ${session.file}${session.stale ? "  stale" : ""}`),
       "slowest checks (transcript, tool call):",
-      ...slowest.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${Math.round(entry.seconds)} s  ${entry.outcome}  ${entry.file}  ${entry.id}`),
+      ...slowest.map((entry) => `  ${entry.at.slice(0, 16)}  ${entry.kind}  ${Math.round(entry.seconds)} s  ${entry.outcome}  ${entry.file}  ${entry.id}${mark(entry)}`),
     ]);
   }
   const repos = repoReport(usage);
-  return emit({ since: from.toISOString(), repos }, () => [
-    `since ${day(from.toISOString())}: ${repos.length} repositories`,
-    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "last"], repos.map((stats) => [
-      stats.repo, String(stats.sessions), String(stats.prompts), percent(stats.correctionRate), String(stats.interrupts),
-      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), day(stats.lastActive),
+  return emit({ since: from.toISOString(), until: to?.toISOString(), repos }, () => [
+    `${span}: ${repos.length} repositories`,
+    ...table(["repo", "sess", "stale", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "unknown", "gate rep", "last"], repos.map((stats) => [
+      stats.repo, String(stats.sessions), String(stats.staleSessions), String(stats.prompts), fresh(stats.correctionRate, stats.sessions, stats.staleSessions), String(stats.interrupts),
+      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), fresh(stats.unknownRate, stats.sessions, stats.staleSessions), optionalPercent(stats.repeatedGate), day(stats.lastActive),
     ])),
   ]);
 }

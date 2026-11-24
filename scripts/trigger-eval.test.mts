@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { compileCatalog } from "./lint.mts";
-import { DEFAULT_CASES, flips, invocableSkills, judge, main, parseCases, pickedSkill, scoreBySkill, type TriggerRun } from "./trigger-eval.mts";
+import { casesFor, combine, DEFAULT_CASES, flips, invocableSkills, judge, main, parseCases, pickedSkill, reportedModel, scoreBySkill, type TriggerRun } from "./trigger-eval.mts";
 
 const roots: string[] = [];
 after(async () => {
@@ -40,6 +40,26 @@ test("cases name only skills the model can load, and accepted alternatives pass"
   assert.equal(judge(testCase, "pr-format"), true);
   assert.equal(judge(testCase, null), false);
   assert.equal(judge({ prompt: "y", expect: null }, null), true);
+});
+
+test("near prompts that must not load a skill run with that skill's cases", () => {
+  assert.throws(() => parseCases(JSON.stringify({ cases: [{ prompt: "x", expect: "send", avoid: ["send"] }] }), ["send"]), /avoid names an expected skill/);
+  assert.throws(() => parseCases(JSON.stringify({ cases: [{ prompt: "x", expect: null, avoid: ["arena"] }] }), ["send"]), /arena is not a model-invocable/);
+  const cases = parseCases(JSON.stringify({ cases: [
+    { prompt: "a", expect: "send" },
+    { prompt: "b", expect: "pr-format", accept: ["send"] },
+    { prompt: "c", expect: "pr-format", avoid: ["send"] },
+    { prompt: "d", expect: null },
+  ] }), ["send", "pr-format"]);
+  assert.deepEqual(casesFor(cases, "send").map((item) => item.prompt), ["a", "b", "c"]);
+});
+
+test("a case run several times takes the majority, and the CLI reports its model", () => {
+  const testCase = { prompt: "x", expect: "send" };
+  assert.deepEqual(combine(testCase, [null, "send", "send"]), { ...testCase, picked: "send", pass: true, picks: [null, "send", "send"] });
+  assert.equal(combine(testCase, [null, "send", null]).pass, false);
+  assert.equal(reportedModel(['{"type":"system","subtype":"init","model":"claude-x"}', '{"type":"result"}'].join("\n")), "claude-x");
+  assert.equal(reportedModel("not json"), null);
 });
 
 test("the cases of this catalog name only model-invocable skills", async () => {
@@ -98,4 +118,39 @@ exit 1
   await chmod(broken, 0o755);
   assert.equal(await main([...args.slice(0, -1), broken], () => {}, () => {}), 1);
   assert.equal((await readdir(results)).length, 1, "a run with errored cases is not saved as a baseline");
+});
+
+test("a missed case runs again, and a retro compares with the run it started from", async () => {
+  const dir = await tmp();
+  const skills = path.join(dir, "skills");
+  await put(path.join(skills, "send", "SKILL.md"), "---\nname: send\ndescription: d\n---\n");
+  await put(path.join(dir, "cases.json"), JSON.stringify({ cases: [{ prompt: "flaky send", expect: "send" }, { prompt: "steady send", expect: "send" }] }));
+  const fake = path.join(dir, "claude");
+  // "flaky" loads nothing on its first call and the skill afterwards; "steady" always loads it.
+  await put(fake, `#!/bin/sh
+echo '{"type":"system","subtype":"init","model":"claude-test"}'
+case "$2" in
+  *flaky*) if [ -f "${dir}/seen" ]; then echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"send"}}]}}'; else touch "${dir}/seen"; fi;;
+  *) echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"send"}}]}}';;
+esac
+echo '{"type":"result"}'
+`);
+  await chmod(fake, 0o755);
+  const results = path.join(dir, "results");
+  const args = ["--skills", skills, "--cases", path.join(dir, "cases.json"), "--instructions", path.join(dir, "none.md"), "--results", results, "--claude", fake];
+  const lines: string[] = [];
+  assert.equal(await main(args, (line) => lines.push(line), () => {}), 0);
+  assert.equal(lines[0], "passed 2/2", "two of three runs passed");
+  const [saved] = await readdir(results);
+  assert.ok(saved);
+  const run = JSON.parse(await (await import("node:fs/promises")).readFile(path.join(results, saved), "utf8")) as TriggerRun;
+  assert.deepEqual(run.results.map((result) => result.picks), [[null, "send", "send"], undefined]);
+  assert.equal(run.resolvedModel, "claude-test");
+  assert.equal(run.instructionsHash, null);
+
+  const baseline = path.join(dir, "baseline.json");
+  await put(baseline, JSON.stringify({ ...run, results: run.results.map((result) => ({ ...result, pass: false, picks: undefined })) }));
+  const compared: string[] = [];
+  assert.equal(await main([...args, "--baseline", baseline, "--skill", "send"], (line) => compared.push(line), () => {}), 0);
+  assert.deepEqual(compared.slice(1), [`compared with ${baseline}`, "  fixed (3/3 runs): flaky send", "  fixed (3/3 runs): steady send"]);
 });

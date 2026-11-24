@@ -12,22 +12,38 @@ export const DEFAULT_CASES = path.join(path.dirname(import.meta.dirname), "evals
 export const DEFAULT_RESULTS = path.join(os.homedir(), ".agents", "usage", "trigger-evals");
 export const DEFAULT_INSTRUCTIONS = path.join(os.homedir(), ".claude", "CLAUDE.md");
 
-/** `expect: null` means no catalog skill should load; `accept` lists other skills that also count as right. */
-export type TriggerCase = { prompt: string; expect: string | null; accept?: string[] };
+/**
+ * `expect: null` means no catalog skill should load; `accept` lists other skills that also count as right.
+ * `avoid` names skills a near prompt must not load, so `--skill` runs the case for them too.
+ */
+export type TriggerCase = { prompt: string; expect: string | null; accept?: string[]; avoid?: string[] };
 
-export type TriggerResult = TriggerCase & { picked: string | null; pass: boolean; error?: string };
+export type TriggerResult = TriggerCase & {
+  picked: string | null;
+  pass: boolean;
+  error?: string;
+  /** Set when the case ran again after a miss or a change from the baseline: every pick, and it passes by majority. */
+  picks?: Array<string | null>;
+};
 
 export type TriggerRun = {
   createdAt: string;
   /** Hash of the compiled skill texts, so a run tells which catalog state it measured. */
   catalogHash: string;
+  /** The `--model` asked for; null runs the account default. */
   model: string | null;
+  /** The model the CLI reported, so a change of the account default does not read as a catalog effect. */
+  resolvedModel?: string | null;
+  /** Hash of the profile instructions the cases ran with; null when there were none. */
+  instructionsHash?: string | null;
   results: TriggerResult[];
 };
 
 export type SkillScore = { skill: string; cases: number; hits: number; wrongPicks: number };
 
 const TIMEOUT_MS = 180_000;
+/** Extra runs of a case that missed or changed from the baseline, so one noisy pick does not decide it. */
+export const DEFAULT_RETRIES = 2;
 
 export function parseCases(text: string, invocable: string[]): TriggerCase[] {
   const raw = JSON.parse(text) as { cases?: unknown };
@@ -36,13 +52,17 @@ export function parseCases(text: string, invocable: string[]): TriggerCase[] {
     const value = item as Partial<TriggerCase>;
     if (typeof value.prompt !== "string" || !value.prompt.trim()) throw new Error(`Case ${index}: prompt is required`);
     if (value.expect !== null && typeof value.expect !== "string") throw new Error(`Case ${index}: expect must be a skill name or null`);
-    if (value.accept !== undefined && (!Array.isArray(value.accept) || !value.accept.every((skill) => typeof skill === "string"))) {
-      throw new Error(`Case ${index}: accept must be a list of skill names`);
+    for (const field of ["accept", "avoid"] as const) {
+      const list = value[field];
+      if (list !== undefined && (!Array.isArray(list) || !list.every((skill) => typeof skill === "string"))) {
+        throw new Error(`Case ${index}: ${field} must be a list of skill names`);
+      }
     }
-    for (const skill of [value.expect, ...(value.accept ?? [])]) {
+    for (const skill of [value.expect, ...(value.accept ?? []), ...(value.avoid ?? [])]) {
       if (skill !== null && skill !== undefined && !invocable.includes(skill)) throw new Error(`Case ${index}: ${skill} is not a model-invocable catalog skill`);
     }
-    return { prompt: value.prompt, expect: value.expect, ...(value.accept ? { accept: value.accept } : {}) };
+    if (value.avoid?.some((skill) => skill === value.expect || value.accept?.includes(skill))) throw new Error(`Case ${index}: avoid names an expected skill`);
+    return { prompt: value.prompt, expect: value.expect, ...(value.accept ? { accept: value.accept } : {}), ...(value.avoid ? { avoid: value.avoid } : {}) };
   });
 }
 
@@ -93,6 +113,20 @@ export function scoreBySkill(results: TriggerResult[]): SkillScore[] {
   return [...scores.values()].sort((a, b) => a.skill.localeCompare(b.skill));
 }
 
+/** Cases a `--skill` run covers: the skill expected or accepted, and near prompts that must not load it. */
+export function casesFor(cases: TriggerCase[], skill: string): TriggerCase[] {
+  return cases.filter((item) => item.expect === skill || item.accept?.includes(skill) || item.avoid?.includes(skill));
+}
+
+/** One result from several runs of a case: the most frequent pick, passing when most runs passed. */
+export function combine(testCase: TriggerCase, picks: Array<string | null>): TriggerResult {
+  const counts = new Map<string | null, number>();
+  for (const pick of picks) counts.set(pick, (counts.get(pick) ?? 0) + 1);
+  const picked = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const passes = picks.filter((pick) => judge(testCase, pick)).length;
+  return { ...testCase, picked, pass: passes * 2 > picks.length, picks };
+}
+
 /** Cases whose outcome changed since a previous run of the same prompts. */
 export function flips(previous: TriggerRun, current: TriggerRun): TriggerResult[] {
   const before = new Map(previous.results.map((result) => [result.prompt, result]));
@@ -113,6 +147,9 @@ export async function runTriggerEval(options: {
   cases: TriggerCase[];
   model: string | undefined;
   concurrency: number;
+  /** Extra runs for each case that missed or changed from `baseline`. */
+  retries?: number;
+  baseline?: TriggerRun;
   claude?: string;
   onResult?: (result: TriggerResult, done: number) => void;
 }): Promise<TriggerRun> {
@@ -125,20 +162,46 @@ export async function runTriggerEval(options: {
     }
     if (options.instructions !== undefined) await writeFile(path.join(workspace, "CLAUDE.md"), options.instructions);
     const catalog = options.skills.map((skill) => skill.name);
-    const results: TriggerResult[] = new Array(options.cases.length);
-    let next = 0;
+    let resolvedModel: string | null = null;
     let done = 0;
-    const worker = async (): Promise<void> => {
-      while (next < options.cases.length) {
-        const index = next++;
-        const testCase = options.cases[index] as TriggerCase;
-        results[index] = await runCase(options.claude ?? "claude", workspace, testCase, options.model, catalog);
-        done += 1;
-        options.onResult?.(results[index] as TriggerResult, done);
-      }
+    const pool = async (indexes: number[], each: (result: TriggerResult, index: number) => void): Promise<void> => {
+      let next = 0;
+      const worker = async (): Promise<void> => {
+        while (next < indexes.length) {
+          const index = indexes[next++] as number;
+          const outcome = await runCase(options.claude ?? "claude", workspace, options.cases[index] as TriggerCase, options.model, catalog);
+          resolvedModel ??= outcome.model;
+          done += 1;
+          each(outcome.result, index);
+          options.onResult?.(outcome.result, done);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.max(1, options.concurrency) }, worker));
     };
-    await Promise.all(Array.from({ length: Math.max(1, options.concurrency) }, worker));
-    return { createdAt: new Date().toISOString(), catalogHash: catalogHash(options.skills), model: options.model ?? null, results };
+    const results: TriggerResult[] = new Array(options.cases.length);
+    await pool(options.cases.map((_, index) => index), (result, index) => (results[index] = result));
+
+    const before = new Map(options.baseline?.results.map((result) => [result.prompt, result]) ?? []);
+    const recheck = results.flatMap((result, index) => {
+      const old = before.get(result.prompt);
+      return !result.error && (!result.pass || (old !== undefined && !old.error && old.pass !== result.pass)) ? [index] : [];
+    });
+    const reruns = new Map<number, TriggerResult[]>();
+    const retries = options.retries ?? DEFAULT_RETRIES;
+    await pool(recheck.flatMap((index) => Array.from({ length: retries }, () => index)), (result, index) => reruns.set(index, [...(reruns.get(index) ?? []), result]));
+    for (const [index, extra] of reruns) {
+      const first = results[index] as TriggerResult;
+      const failed = extra.find((result) => result.error);
+      results[index] = failed ?? combine(options.cases[index] as TriggerCase, [first.picked, ...extra.map((result) => result.picked)]);
+    }
+    return {
+      createdAt: new Date().toISOString(),
+      catalogHash: catalogHash(options.skills),
+      model: options.model ?? null,
+      resolvedModel,
+      instructionsHash: options.instructions === undefined ? null : createHash("sha256").update(options.instructions).digest("hex").slice(0, 12),
+      results,
+    };
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -150,7 +213,7 @@ function catalogHash(skills: CompiledSkill[]): string {
   return hash.digest("hex").slice(0, 12);
 }
 
-async function runCase(claude: string, cwd: string, testCase: TriggerCase, model: string | undefined, catalog: string[]): Promise<TriggerResult> {
+async function runCase(claude: string, cwd: string, testCase: TriggerCase, model: string | undefined, catalog: string[]): Promise<{ result: TriggerResult; model: string | null }> {
   const args = [
     "-p", testCase.prompt,
     "--setting-sources", "project",
@@ -180,9 +243,23 @@ async function runCase(claude: string, cwd: string, testCase: TriggerCase, model
       resolve(finished ? { stdout } : { stdout, error: signal ? `killed by ${signal}` : `exit ${code}: ${stderr.trim().slice(0, 300)}` });
     });
   });
-  if (outcome.error) return { ...testCase, picked: null, pass: false, error: outcome.error };
+  const reported = reportedModel(outcome.stdout);
+  if (outcome.error) return { result: { ...testCase, picked: null, pass: false, error: outcome.error }, model: reported };
   const picked = pickedSkill(outcome.stdout, catalog);
-  return { ...testCase, picked, pass: judge(testCase, picked) };
+  return { result: { ...testCase, picked, pass: judge(testCase, picked) }, model: reported };
+}
+
+/** The model named by the CLI's `system` init event. */
+export function reportedModel(stream: string): string | null {
+  for (const raw of stream.split("\n")) {
+    try {
+      const event = JSON.parse(raw) as { type?: string; subtype?: string; model?: unknown };
+      if (event.type === "system" && event.subtype === "init" && typeof event.model === "string") return event.model;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 export async function saveRun(dir: string, run: TriggerRun): Promise<string> {
@@ -205,7 +282,7 @@ export async function latestRun(dir: string, model: string | null): Promise<Trig
   return undefined;
 }
 
-const USAGE = `Usage: trigger-eval.mts [--skill <name>] [--model <model>] [--json] [--dry-run]
+const USAGE = `Usage: trigger-eval.mts [--skill <name>] [--model <model>] [--baseline <saved run>] [--retries <n>] [--json] [--dry-run]
 Options: --skills <dir> (default: the catalog next to this script), --cases <file>, --instructions <file> (default ~/.claude/CLAUDE.md), --results <dir>, --claude <bin>`;
 
 export async function main(argv: string[], print: (line: string) => void = console.log, log: (line: string) => void = console.error): Promise<number> {
@@ -215,6 +292,8 @@ export async function main(argv: string[], print: (line: string) => void = conso
     options: {
       skill: { type: "string" },
       model: { type: "string" },
+      baseline: { type: "string" },
+      retries: { type: "string" },
       json: { type: "boolean" },
       "dry-run": { type: "boolean" },
       skills: { type: "string" },
@@ -228,11 +307,13 @@ export async function main(argv: string[], print: (line: string) => void = conso
   const skills = await compileCatalog(values.skills ?? DEFAULT_SKILLS, "claude");
   const all = parseCases(await readFile(values.cases ?? DEFAULT_CASES, "utf8"), invocableSkills(skills));
   const skill = values.skill;
-  const cases = skill ? all.filter((item) => item.expect === skill || item.accept?.includes(skill)) : all;
+  const cases = skill ? casesFor(all, skill) : all;
+  const retries = values.retries === undefined ? DEFAULT_RETRIES : Number(values.retries);
+  if (!Number.isInteger(retries) || retries < 0) throw new Error("--retries must be a whole number");
   if (cases.length === 0) throw new Error(`No trigger cases for ${skill}`);
   if (values["dry-run"]) {
     for (const item of cases) print(`${item.expect ?? "(none)"}  ${item.prompt}`);
-    print(`dry-run: ${cases.length} claude -p calls`);
+    print(`dry-run: ${cases.length} claude -p calls, plus ${retries} for each case that misses or changes`);
     return 0;
   }
   const instructionsPath = values.instructions ?? DEFAULT_INSTRUCTIONS;
@@ -243,7 +324,10 @@ export async function main(argv: string[], print: (line: string) => void = conso
   if (instructions === undefined) log(`warning: ${instructionsPath} not found; running without profile instructions`);
   const resultsDir = values.results ?? DEFAULT_RESULTS;
   const model = values.model ?? null;
-  const previous = skill ? undefined : await latestRun(resultsDir, model);
+  // A retro compares every iteration with the run it started from, not with the last saved one.
+  const previous = values.baseline
+    ? (JSON.parse(await readFile(values.baseline, "utf8")) as TriggerRun)
+    : skill ? undefined : await latestRun(resultsDir, model);
   log(`running ${cases.length} cases with ${values.model ?? "the default model"}`);
   const run = await runTriggerEval({
     skills,
@@ -251,8 +335,10 @@ export async function main(argv: string[], print: (line: string) => void = conso
     cases,
     model: values.model,
     concurrency: 4,
+    retries,
+    ...(previous ? { baseline: previous } : {}),
     ...(values.claude ? { claude: values.claude } : {}),
-    onResult: (result, done) => log(`${String(done).padStart(3)}/${cases.length} ${result.pass ? "pass" : "FAIL"}  ${result.prompt.slice(0, 70)}`),
+    onResult: (result, done) => log(`${done > cases.length ? "rerun  " : `${String(done).padStart(3)}/${cases.length}`} ${result.pass ? "pass" : "FAIL"}  ${result.prompt.slice(0, 70)}`),
   });
   const failed = run.results.some((result) => result.error);
   // A run with errored cases would hide their regressions as the next baseline.
@@ -263,14 +349,18 @@ export async function main(argv: string[], print: (line: string) => void = conso
   }
   const scored = run.results.filter((result) => !result.error);
   print(`passed ${scored.filter((result) => result.pass).length}/${scored.length}` + (failed ? ` (${run.results.length - scored.length} errors)` : ""));
+  const sampled = (result: TriggerResult): string => (result.picks ? ` (${result.picks.filter((pick) => judge(result, pick)).length}/${result.picks.length} runs)` : "");
   for (const result of run.results.filter((item) => !item.pass)) {
-    print(`  expected ${result.expect ?? "(none)"}, got ${result.error ? `error: ${result.error}` : (result.picked ?? "(none)")}: ${result.prompt}`);
+    print(`  expected ${result.expect ?? "(none)"}, got ${result.error ? `error: ${result.error}` : (result.picked ?? "(none)")}${sampled(result)}: ${result.prompt}`);
   }
   for (const score of scoreBySkill(run.results).filter((item) => item.hits < item.cases || item.wrongPicks > 0)) {
     print(`  ${score.skill}: ${score.hits}/${score.cases} hits, ${score.wrongPicks} wrong picks`);
   }
-  if (previous && previous.catalogHash !== run.catalogHash) {
-    for (const result of flips(previous, run)) print(`  ${result.pass ? "fixed" : "regressed"}: ${result.prompt}`);
+  if (previous && (values.baseline || previous.catalogHash !== run.catalogHash)) {
+    if (values.baseline) print(`compared with ${values.baseline}`);
+    if (previous.resolvedModel && run.resolvedModel && previous.resolvedModel !== run.resolvedModel) print(`  warning: model changed (${previous.resolvedModel} -> ${run.resolvedModel})`);
+    if (previous.instructionsHash !== undefined && previous.instructionsHash !== run.instructionsHash) print("  warning: profile instructions changed");
+    for (const result of flips(previous, run)) print(`  ${result.pass ? "fixed" : "regressed"}${sampled(result)}: ${result.prompt}`);
   }
   if (file) print(`saved ${file}`);
   return failed ? 1 : 0;
