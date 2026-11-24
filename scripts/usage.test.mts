@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { areaReport, busiestSessions, canonicalRuns, checkOf, checkReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
+import { areaReport, busiestSessions, canonicalRuns, checkOf, DEFAULT_CATALOG, gatePerPush, printedExit, RENAMED, checkReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
 
 const roots: string[] = [];
 after(async () => {
@@ -130,7 +130,8 @@ test("corrections are told apart from approvals and new requests", () => {
     "reverte isso", "volta como estava", "para de mexer nesse arquivo", "pare!", "you broke the build", "isso não funcionou",
     "ainda está quebrado", "continua dando erro no CI", "esqueceu de rodar o lint", "você esqueceu o teste", "tá faltando o print",
     "faltou o teste de borda", "de novo o mesmo erro", "não gostei como ficou", "não ficou legal essa tela",
-    "não tínhamos fechado que seria um bottom sheet?", "não é para só adicionar a label", "you forgot the tests", "that's wrong", "it still doesn't work", "stop.",
+    "não tínhamos fechado que seria um bottom sheet?", "não é para só adicionar a label", "você quebrou o build", "deu erro",
+    "tá tudo errado", "eu pedi pra não commitar", "por que você fez push?", "you forgot the tests", "that's wrong", "it still doesn't work", "stop.",
   ]) {
     assert.equal(isCorrection(text), true, text);
   }
@@ -138,7 +139,8 @@ test("corrections are told apart from approvals and new requests", () => {
     "pode mergear", "status?", "agora implementa o próximo", "faltou algo?", "para deploy em staging, qual o comando?",
     "não esquece de rodar o lint", "pare o dev server quando terminar", "volta pro main e abre outra branch", "não precisa de print",
     "no main já tem isso?", "stop the dev server when done", "o teste ainda está passando?", "continua com o próximo item",
-    "para que serve esse script?", "nao sei, decide você",
+    "para que serve esse script?", "nao sei, decide você", "esqueceu algo?", "tá faltando algum passo?", "o deploy quebrou ontem?",
+    "quando deu erro no CI, o que aconteceu?",
   ]) {
     assert.equal(isCorrection(text), false, text);
   }
@@ -203,7 +205,7 @@ test("verification commands are classified by the step that runs them", () => {
   assert.equal(kind("timeout 600 pnpm test"), "test");
   assert.equal(kind("env CI=1 pnpm lint"), "lint");
   assert.equal(kind("git add -A && git commit -m x && git push -u origin feat"), "push");
-  assert.deepEqual(checkOf("pnpm preflight && git push"), { kind: "preflight", masked: false, pushes: true }, "the gate right before the push still counts the push");
+  assert.deepEqual(checkOf("pnpm preflight && git push"), { kind: "preflight", masked: false, reported: false, pushes: true }, "the gate right before the push still counts the push");
   assert.equal(kind("gh pr checks 12 --watch"), "ci-wait");
   assert.equal(kind("node ~/.agents/build/claude/scripts/pr-state.mts 12 dir --wait"), "ci-wait");
   for (const command of [
@@ -225,6 +227,11 @@ test("verification commands are classified by the step that runs them", () => {
   assert.equal(kind("./tooling/preflight.sh"), "preflight");
   assert.equal(kind("python -m pytest -x tests"), "test");
   assert.equal(kind("python3 -m mypy src"), "typecheck");
+  assert.equal(kind("./scripts/test.sh"), "test");
+  assert.equal(kind("poetry run pytest -q"), "test");
+  assert.equal(kind("python manage.py test"), "test");
+  assert.equal(kind("node scripts/test-utils.mts"), undefined, "a support script is not a check");
+  assert.equal(kind("./scripts/seed-data.sh"), undefined);
 });
 
 test("a check whose exit code the command hides has an unknown outcome", () => {
@@ -241,6 +248,38 @@ test("a check whose exit code the command hides has an unknown outcome", () => {
   assert.equal(masked("set +o pipefail; pnpm test | tail"), true);
   assert.equal(masked("set -e\npnpm test\ngit status"), false);
   assert.equal(masked("cat <<'EOF'\nset -o pipefail\nEOF\npnpm test | tail"), true, "pipefail in a heredoc does not count");
+});
+
+test("a check that prints its own exit code is judged by the printed code", () => {
+  assert.equal(checkOf("pnpm preflight > log 2>&1; echo EXIT $?")?.reported, true);
+  assert.equal(checkOf("pnpm test | tail -3")?.reported, false);
+  assert.equal(printedExit("...\nEXIT 1\n"), 1);
+  assert.equal(printedExit("done\nexit=0"), 0);
+  assert.equal(printedExit("Tests: 3 passed\n"), undefined);
+  const { checks } = parseTranscript("/t/e.jsonl", jsonl([
+    assistant("m1", "2026-11-01T10:00:00.000Z", 1, [bash("a", "pnpm preflight > log 2>&1; echo \"EXIT $?\"")]),
+    toolResult("2026-11-01T10:01:00.000Z", "a", false, "EXIT 1"),
+    assistant("m2", "2026-11-01T10:02:00.000Z", 1, [bash("b", "pnpm test; echo rc=$?")]),
+    toolResult("2026-11-01T10:03:00.000Z", "b", false, "rc=0"),
+    assistant("m3", "2026-11-01T10:04:00.000Z", 1, [bash("c", "pnpm test; echo $? > status")]),
+    toolResult("2026-11-01T10:05:00.000Z", "c", false, ""),
+  ]));
+  assert.deepEqual(checks.map((check) => check.outcome), ["fail", "ok", "unknown"]);
+});
+
+test("the gate per push counts local gate runs in sessions that pushed", () => {
+  const run = (sessionId: string, kind: "preflight" | "push" | "test", pushes = false) => ({ id: "x", sessionId, file: "f", repo: "app", at: "2026-11-01T10:00:00.000Z", kind, command: "c", seconds: 1, background: false, outcome: "ok" as const, pushes });
+  assert.equal(gatePerPush([run("s1", "test"), run("s1", "push")]), undefined, "no gate in the repository");
+  assert.equal(gatePerPush([run("s1", "preflight"), run("s1", "preflight"), run("s1", "push"), run("s2", "preflight"), run("s2", "preflight", true), run("s3", "preflight")]), 2, "s3 never pushed");
+});
+
+test("renamed skills point at current catalog skills", async () => {
+  const { readdir } = await import("node:fs/promises");
+  const catalog = await readdir(DEFAULT_CATALOG);
+  for (const [old, current] of Object.entries(RENAMED)) {
+    assert.ok(catalog.includes(current), `${old} -> ${current} is not in the catalog`);
+    assert.ok(!catalog.includes(old), `${old} is still a catalog skill`);
+  }
 });
 
 test("check time runs to the result, or to the completion notice in the background", () => {
@@ -330,6 +369,9 @@ test("reports compare skill versions and rank repositories", async () => {
   ]);
   assert.deepEqual(report.unused, ["mockup"]);
   assert.deepEqual(versionReport(runs, "send").map((stats) => [stats.firstUsed.slice(0, 10), stats.correctionRate]), [["2026-11-01", 0], ["2026-11-05", 1]]);
+  const check = (sessionId: string, outcome: "ok" | "unknown") => ({ id: "x", sessionId, file: "f", repo: "app", at: "2026-11-05T10:00:30.000Z", kind: "test" as const, command: "pnpm test", seconds: 1, background: false, outcome, pushes: false });
+  const bySession = runs.map((run) => ({ ...run, sessionId: run.file }));
+  assert.deepEqual(versionReport(bySession, "send", [check("/t/a.jsonl", "ok"), check("/t/b.jsonl", "unknown"), check("/t/b.jsonl", "unknown"), check("other", "unknown")]).map((stats) => [stats.checks, stats.unknownRate]), [[1, 0], [2, 1]], "checks count in the sessions where each version loaded");
 
   const usage = parseTranscript("/t/d.jsonl", jsonl([
     human("faz o fix", "2026-11-05T10:00:00.000Z"),

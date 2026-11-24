@@ -13,11 +13,13 @@ export const DEFAULT_CATALOG = path.join(path.dirname(import.meta.dirname), "ski
 /** Former catalog names, so a renamed skill keeps one history. Add the old name when renaming a catalog skill. */
 export const RENAMED: Readonly<Record<string, string>> = {
   "ban-bad-pattern": "ban-bad-patterns",
+  "correct-repo": "retro-repo",
   "design-guide": "ui-principles",
   "full-send": "send-full",
   "github-issue-read": "github-read",
   mockup: "ui-mockup",
   "principle-ui-design": "ui-principles",
+  "skill-retro": "retro-skill",
   "validation-loop": "review-loop",
 };
 
@@ -96,20 +98,21 @@ export type Usage = {
 
 type Store = Usage & {
   /** Bumped when parsing changes, so the next ingest re-reads every transcript still on disk. */
-  version: 8;
+  version: 9;
   /** Transcript path -> mtime already ingested. */
   files: Record<string, number>;
 };
 
-const STORE_VERSION = 8;
+/** Bump when a classification changes: the store is rebuilt, so old and new rules never mix (entries of deleted transcripts are lost). */
+const STORE_VERSION = 9;
 const SKILL_HEADER = "Base directory for this skill: ";
 const INTERRUPT = "[Request interrupted by user";
 const WORKTREE = /\/\.(claude|codex)\/worktrees\/[^/]+/;
 // Accents are stripped before matching, so the Portuguese words carry none.
 // On the lowercased prompt without accents. "nao", "para" and "stop" are corrections only as the first word and alone
 // or followed by a few words: "nao esquece de rodar" and "para deploy" are requests.
-const CORRECTION_START = /^(?:(?:nao|nope|no)(?:[,.!;:]|$)|nao (?:era|e isso|foi isso|e assim|e bem isso|e para|e pra|gostei|ficou|(?:tinhamos|haviamos|tinha) (?:fechado|combinado|decidido))|na verdade|errad|incorret|desfaz|desfaca|revert|volt[ae] (?:como|atras|ao que|pro que|para o que)|(?:pare|para)(?: de\b| com\b|[,.!]|$)|stop(?: doing\b|[,.!]|$)|wrong\b|undo\b|that'?s not\b)/;
-const CORRECTION_ANY = /\b(?:esta errad|ta errad|errou\b|nao e isso|nao pedi|nao funcion|nao deu certo|esqueceu\b|ta faltando|esta faltando|faltou (?:o|a|os|as)\b|de novo o mesmo|mesmo erro|continua (?:quebrad|errad|falhand|com erro|dando erro)|ainda (?:esta |ta )?(?:quebrad|errad|falhand|com erro|dando erro)|you broke|not what i|you forgot|forgot to|is wrong|that'?s wrong|didn'?t work|doesn'?t work|not working|still (?:broken|failing)|same error)/;
+const CORRECTION_START = /^(?:(?:nao|nope|no)(?:[,.!;:]|$)|nao (?:era|e isso|foi isso|e assim|e bem isso|e para|e pra|gostei|ficou|(?:tinhamos|haviamos|tinha) (?:fechado|combinado|decidido))|na verdade|errad|incorret|desfaz|desfaca|revert|volt[ae] (?:como|atras|ao que|pro que|para o que)|(?:pare|para)(?: de\b| com\b|[,.!]|$)|stop(?: doing\b|[,.!]|$)|wrong\b|undo\b|that'?s not\b|deu erro\b)/;
+const CORRECTION_ANY = /\b(?:ainda (?:nao )?(?:esta |ta )?(?:correto|certo|legal|bom|com (?:o |esse |um )?problema)|ainda nao (?:gostei|e (?:o que|oque))|ainda falta|nao (?:ficou|ficaram)\b|ficou diferente|nao (?:apareceu|apareceram|mudou|carregou|carrega)\b|ainda n(?:ao)? foi\b|nao foi feito|continua (?:quebrand|igual|aparecendo|acontecendo)|(?:estou |to )?achando (?:muito|meio|bem) |notei que|ficou (?:errad|estranh|ruim|feio|cortad|quebrad|faltando)|nao gostei|nao deveria\b|faltou (?!algo|algum|alguma|nada|oque|o que)\w+|faltaram\b|incorret|horrivel|(?:esta|ta) quebrad|nao e (?:o que|oque) eu (?:quero|pedi)|esta errad|ta errad|errou\b|nao e isso|nao pedi|nao (?:esta |ta )?funcion|nao (?:esta|ta) (?:legal|bom|certo|correto)|nao deu certo|esqueceu\b(?! (?:algo|algum|alguma|nada))|(?:ta|esta) faltando(?! (?:algo|algum|alguma|nada))|(?:voce|vc) quebrou|quebrou (?:o|a|os|as) (?:build|ci|teste|testes|app|tela|deploy)|tudo errad|eu pedi\b|por que (?:voce|vc) (?:fez|mexeu|mudou|apagou|removeu|commitou|rodou|publicou)|faltou (?:o|a|os|as)\b|de novo o mesmo|mesmo erro|continua (?:quebrad|errad|falhand|com erro|dando erro)|ainda (?:esta |ta )?(?:quebrad|errad|falhand|com erro|dando erro)|you broke|not what i|you forgot|forgot to|is wrong|that'?s wrong|didn'?t work|doesn'?t work|not working|still (?:broken|failing)|same error)/;
 const FINDING = /(?:^|\n)[ \t>*-]*R\d+ \[(blocker|should|nit|pre-existing)\] `?([^\s`]+)`?[^\n]*/g;
 const SUBCOMMANDS = new Set(["pnpm", "npm", "yarn", "bun", "npx", "git", "gh", "docker", "make", "cargo", "go", "flutter", "dart", "uv", "pip", "poetry", "kubectl", "terraform", "supabase"]);
 const READ_ONLY = new Set(["cat", "ls", "head", "tail", "grep", "rg", "find", "sed", "awk", "wc", "stat", "file", "tree", "jq", "diff", "git status", "git log", "git show", "git diff", "git rev-parse", "git branch", "git ls-files", "git grep", "git ls-remote"]);
@@ -120,7 +123,7 @@ const PROGRAM = /^[\w.@+-]+$/;
 /** Flags whose next word is their value, so it is not taken for the subcommand. */
 const VALUE_FLAGS = new Set(["--filter", "-F", "-C", "--dir", "--prefix", "--cwd", "--repo", "-R", "--workspace", "-f", "--file", "-p", "--project", "-n", "--namespace", "--context", "-c", "--git-dir", "--work-tree"]);
 /** Programs that run a project's checks; the check kind comes from their arguments. */
-const RUNNERS = new Set(["bash", "sh", "python", "python3", "pnpm", "npm", "yarn", "bun", "bunx", "npx", "turbo", "nx", "node", "tsx", "make", "cargo", "go", "flutter", "dart", "uv", "pytest", "vitest", "jest", "playwright", "tsc", "eslint", "oxlint", "biome", "ruff", "mypy", "pyright", "gradle", "gradlew", "mvn"]);
+const RUNNERS = new Set(["bash", "sh", "python", "python3", "poetry", "pipenv", "hatch", "pnpm", "npm", "yarn", "bun", "bunx", "npx", "turbo", "nx", "node", "tsx", "make", "cargo", "go", "flutter", "dart", "uv", "pytest", "vitest", "jest", "playwright", "tsc", "eslint", "oxlint", "biome", "ruff", "mypy", "pyright", "gradle", "gradlew", "mvn"]);
 /** First match wins, so a step that names several kinds counts as the broadest one. */
 const CHECK_WORDS: Array<[CheckKind, RegExp]> = [
   ["preflight", /\bpreflight\b/],
@@ -135,6 +138,14 @@ const NOT_CHECKS = new Set(["add", "install", "i", "remove", "rm", "uninstall", 
 const NOT_RUN = new Set<FailureKind>(["blocked", "denied", "rejected", "interrupted", "outside-worktree"]);
 /** Script runners: the check is named by the script file, not by the directories in its path. */
 const SCRIPT_RUNNERS = new Set(["node", "tsx", "bash", "sh", "python", "python3"]);
+const SCRIPT_FILE = /\.(sh|py|js|mjs|cjs|ts|mts)$/;
+
+/** The words of a script name (`run-tests.sh` → `run tests sh`); none for support files such as `test-utils.mts`. */
+function scriptWords(name: string): string {
+  const words = name.split(/[-_.]/);
+  return words.some((word) => /^(utils?|helpers?|fixtures?|mocks?|setup|data|lib)$/.test(word)) ? "" : words.join(" ");
+}
+
 /** When one command runs several checks, it counts as the one that dominates its time. */
 const CHECK_ORDER: CheckKind[] = ["preflight", "push", "e2e", "test", "typecheck", "lint", "build", "ci-wait"];
 /** Runs longer than this are left out of the times: a stuck process or a delayed completion notice. */
@@ -143,14 +154,14 @@ const NOTICE = /<task-notification>([\s\S]*?)<\/task-notification>/g;
 
 type Line = Record<string, unknown>;
 type OpenRun = Omit<SkillRun, "reaction"> & { messages: Set<string> };
-type OpenCheck = Omit<CheckRun, "seconds" | "outcome"> & { masked: boolean };
+type OpenCheck = Omit<CheckRun, "seconds" | "outcome"> & { masked: boolean; reported: boolean };
 
 export function parseTranscript(file: string, text: string): Usage {
   const usage: Usage = { runs: [], prompts: [], findings: [], failures: [], checks: [] };
   let open: OpenRun[] = [];
   const checks = new Map<string, OpenCheck>();
   const finish = (check: OpenCheck, at: string, failed: boolean, outcome?: CheckRun["outcome"]): void => {
-    const { masked, ...rest } = check;
+    const { masked, reported: _reported, ...rest } = check;
     const seconds = Math.max(0, (Date.parse(at) - Date.parse(check.at)) / 1000);
     usage.checks.push({ ...rest, seconds, outcome: outcome ?? (failed ? "fail" : masked ? "unknown" : "ok") });
     checks.delete(check.id);
@@ -217,6 +228,10 @@ export function parseTranscript(file: string, text: string): Usage {
             if (NOT_RUN.has(kind)) checks.delete(check.id);
             // A missing file may be the check's failure or another step's.
             else finish(check, at, true, kind === "missing-path" || kind === "not-found" ? "unknown" : "fail");
+          } else if (check.masked && check.reported) {
+            // `check; echo "exit $?"` hides the code from the harness but prints it.
+            const code = printedExit(output);
+            finish(check, at, false, code === undefined ? "unknown" : code === 0 ? "ok" : "fail");
           } else finish(check, at, false);
         }
       }
@@ -403,8 +418,20 @@ export function commandSignature(command: string): string {
   return steps.slice(0, 4).join(" && ") || "(shell)";
 }
 
-/** The verification a command runs, if any, and whether the command hides that step's exit code. */
-export function checkOf(command: string): { kind: CheckKind; masked: boolean; pushes: boolean } | undefined {
+/** The exit code a command printed itself (`echo "exit $?"`, `EXIT=1`, `rc: 0`), from the last line that names one. */
+export function printedExit(output: string): number | undefined {
+  for (const line of output.trimEnd().split("\n").reverse()) {
+    const match = /\b(?:exit(?:[ _-]?code)?|status|rc|code)\b\s*[:=]?\s*(\d{1,3})\s*$/i.exec(line.trim()) ?? /^(\d{1,3})$/.exec(line.trim());
+    if (match) return Number(match[1]);
+  }
+  return undefined;
+}
+
+/**
+ * The verification a command runs, if any; whether the command hides that step's exit code from the harness,
+ * and whether it prints the code (`$?`, `PIPESTATUS`) so the output still tells the outcome.
+ */
+export function checkOf(command: string): { kind: CheckKind; masked: boolean; reported: boolean; pushes: boolean } | undefined {
   const shell = shellText(command);
   const pipefail = /\bset\s+-\w*o\s+pipefail\b/.test(shell);
   const errexit = /\bset\s+-\w*e/.test(shell);
@@ -413,18 +440,24 @@ export function checkOf(command: string): { kind: CheckKind; masked: boolean; pu
   for (const { program, args, next, last, orAfter } of shellSteps(command)) {
     // Flag values (`--filter test-kit`) name targets, not the check.
     const words = args.filter((word, index) => !word.startsWith("-") && !VALUE_FLAGS.has(args[index - 1] ?? ""));
-    const text = SCRIPT_RUNNERS.has(program) ? path.basename(words[0] ?? "") : words.join(" ");
+    const script = path.basename(words[0] ?? "");
+    // `python manage.py test`: Django names the check after the script.
+    const text = SCRIPT_RUNNERS.has(program) ? scriptWords(script) + (script === "manage.py" ? ` ${words[1] ?? ""}` : "") : words.join(" ");
+    const runsScript = SCRIPT_FILE.test(program);
     let kind: CheckKind | undefined;
     if (program === "git" && subcommand(args) === "push") kind = "push", pushes = true;
-    else if ((program === "gh" && /^(pr checks|run watch)/.test(text) && (args.includes("--watch") || text.startsWith("run watch"))) || (/\bpr-state\.mts\b/.test(text) && args.includes("--wait"))) kind = "ci-wait";
+    else if ((program === "gh" && /^(pr checks|run watch)/.test(text) && (args.includes("--watch") || text.startsWith("run watch"))) || (script === "pr-state.mts" && args.includes("--wait"))) kind = "ci-wait";
     else if ((program === "node" || program === "tsx") && args.includes("--test")) kind = "test";
     else if (NOT_CHECKS.has(subcommand(args) ?? "") || /\bplaywright (install|show-report|codegen)\b/.test(text)) kind = undefined;
-    else if (RUNNERS.has(program) || /preflight/.test(program)) kind = CHECK_WORDS.find(([, pattern]) => pattern.test(`${program} ${text}`))?.[0];
+    else if (RUNNERS.has(program) || runsScript) {
+      const subject = runsScript ? scriptWords(program) : `${program} ${text}`;
+      kind = CHECK_WORDS.find(([, pattern]) => pattern.test(subject))?.[0];
+    }
     if (!kind || (found && CHECK_ORDER.indexOf(kind) >= CHECK_ORDER.indexOf(found.kind))) continue;
     const masked = next === "||" || orAfter || ((next === "|" || next === "|&") && !pipefail) || ((next === ";" || next === "\n") && !last && !errexit);
     found = { kind, masked };
   }
-  return found && { ...found, pushes };
+  return found && { ...found, reported: found.masked && /\$\?|\$\{?PIPESTATUS/.test(command), pushes };
 }
 
 function subcommand(args: string[]): string | undefined {
@@ -619,7 +652,14 @@ export type SkillStats = {
   lastUsed: string;
 };
 
-export type VersionStats = Omit<SkillStats, "skill" | "inCatalog" | "versions"> & { version: string; firstUsed: string };
+/** Check signals of a version cover the sessions where it loaded, so a rule about checks shows up per version. */
+export type VersionStats = Omit<SkillStats, "skill" | "inCatalog" | "versions"> & {
+  version: string;
+  firstUsed: string;
+  checks: number;
+  unknownRate: number;
+  gatePerPush: number | undefined;
+};
 
 export type RepoStats = {
   repo: string;
@@ -635,6 +675,7 @@ export type RepoStats = {
   checkHours: number;
   /** Checks other than pushes and CI waits whose command hides the exit code. */
   unknownRate: number;
+  gatePerPush: number | undefined;
   lastActive: string;
 };
 
@@ -680,10 +721,33 @@ export function skillReport(runs: SkillRun[], catalog: string[]): { skills: Skil
   return { skills, unused: catalog.filter((name) => !bySkill.has(name)).sort() };
 }
 
-export function versionReport(runs: SkillRun[], skill: string): VersionStats[] {
+export function versionReport(runs: SkillRun[], skill: string, checks: CheckRun[] = []): VersionStats[] {
   return [...groupBy(runs.filter((run) => run.skill === skill), (run) => run.version)]
-    .map(([version, group]) => ({ version, ...runMetrics(group), firstUsed: group[0]?.at ?? "" }))
+    .map(([version, group]) => {
+      const sessions = new Set(group.map((run) => run.sessionId));
+      const own = checks.filter((entry) => sessions.has(entry.sessionId));
+      return { version, ...runMetrics(group), firstUsed: group[0]?.at ?? "", checks: own.length, unknownRate: unknownRate(own), gatePerPush: gatePerPush(own) };
+    })
     .sort((a, b) => a.firstUsed.localeCompare(b.firstUsed));
+}
+
+/** Checks other than pushes and CI waits whose command hides the exit code. */
+function unknownRate(checks: CheckRun[]): number {
+  return rate(checks.filter((entry) => entry.kind !== "push" && entry.kind !== "ci-wait"), (entry) => entry.outcome === "unknown");
+}
+
+/** Local gate (`preflight`) runs per push, in sessions that pushed; undefined without a gate or a push. */
+export function gatePerPush(checks: CheckRun[]): number | undefined {
+  if (!checks.some((entry) => entry.kind === "preflight")) return undefined;
+  let gates = 0;
+  let pushes = 0;
+  for (const group of groupBy(checks, (entry) => entry.sessionId).values()) {
+    const pushed = group.filter((entry) => entry.kind === "push" || entry.pushes).length;
+    if (pushed === 0) continue;
+    pushes += pushed;
+    gates += group.filter((entry) => entry.kind === "preflight").length;
+  }
+  return pushes === 0 ? undefined : gates / pushes;
 }
 
 function runMetrics(group: SkillRun[]) {
@@ -724,7 +788,8 @@ export function repoReport(usage: Usage): RepoStats[] {
         shoulds: findings.filter((entry) => entry.severity === "should").length,
         failures: realFailures.length,
         checkHours: sum(checks.map((entry) => entry.seconds).filter((value) => value <= LATE_SECONDS)) / 3600,
-        unknownRate: rate(checks.filter((entry) => entry.kind !== "push" && entry.kind !== "ci-wait"), (entry) => entry.outcome === "unknown"),
+        unknownRate: unknownRate(checks),
+        gatePerPush: gatePerPush(checks),
         lastActive: all.reduce((last, entry) => (entry.at > last ? entry.at : last), ""),
       };
     })
@@ -819,6 +884,7 @@ export function table(header: string[], rows: string[][]): string[] {
 }
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
+const ratio = (value: number | undefined): string => (value === undefined ? "-" : value.toFixed(1));
 const rate = <T,>(items: T[], hit: (item: T) => boolean): number => (items.length === 0 ? 0 : items.filter(hit).length / items.length);
 const day = (iso: string): string => iso.slice(0, 10);
 
@@ -896,14 +962,16 @@ export async function main(argv: string[], print: (line: string) => void = conso
 
   if (command === "skills" && values.skill) {
     const skill = values.skill;
-    const versions = versionReport(usage.runs, skill);
+    const versions = versionReport(usage.runs, skill, usage.checks);
     const recent = usage.runs.filter((run) => run.skill === skill).slice(-20).reverse();
     return emit({ skill, since: from.toISOString(), versions, recent }, () => [
       `${skill}: ${versions.length} versions since ${day(from.toISOString())}`,
-      ...table(["version", "first", "last", "runs", "turn s", "turn out", "tool err", "interr", "correct"], versions.map((stats) => [
+      ...table(["version", "first", "last", "runs", "turn s", "turn out", "tool err", "interr", "correct", "checks", "unknown", "gate/push"], versions.map((stats) => [
         stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(Math.round(stats.medianSeconds)),
         String(Math.round(stats.medianOutputTokens)), percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate),
+        String(stats.checks), percent(stats.unknownRate), ratio(stats.gatePerPush),
       ])),
+      "checks, unknown and gate/push cover the sessions where the version loaded",
       "recent runs (repo, reaction, transcript, record of the load):",
       ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}  ${run.id}`),
     ]);
@@ -935,7 +1003,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
     const findings = only(usage.findings).filter((entry) => entry.severity === "blocker" || entry.severity === "should").slice(-15).reverse();
     const recentFailures = only(usage.failures).filter((entry) => entry.kind !== "probe").slice(-15).reverse();
     const checks = checkReport(only(usage.checks));
-    const gate = checks.find((stats) => stats.kind !== "push" && stats.kind !== "ci-wait")?.kind;
+    const gate = checks.some((stats) => stats.kind === "preflight") ? "preflight" : undefined;
     const busiest = gate ? busiestSessions(only(usage.checks), gate) : [];
     const slowest = only(usage.checks).filter((entry) => entry.seconds <= LATE_SECONDS).sort((a, b) => b.seconds - a.seconds).slice(0, 10);
     return emit({ repo, since: from.toISOString(), checks, busiest, slowest, areas, failures, corrections, findings, recentFailures }, () => [
@@ -966,9 +1034,9 @@ export async function main(argv: string[], print: (line: string) => void = conso
   const repos = repoReport(usage);
   return emit({ since: from.toISOString(), repos }, () => [
     `since ${day(from.toISOString())}: ${repos.length} repositories`,
-    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "unknown", "last"], repos.map((stats) => [
+    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "unknown", "gate/push", "last"], repos.map((stats) => [
       stats.repo, String(stats.sessions), String(stats.prompts), percent(stats.correctionRate), String(stats.interrupts),
-      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), percent(stats.unknownRate), day(stats.lastActive),
+      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), percent(stats.unknownRate), ratio(stats.gatePerPush), day(stats.lastActive),
     ])),
   ]);
 }

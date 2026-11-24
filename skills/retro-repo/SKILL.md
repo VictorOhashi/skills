@@ -18,7 +18,7 @@ Altere o repositorio para que o proximo agente consiga seguir o caminho correto 
    - as correcoes do usuario;
    - o tempo de lint, testes, gate local, push e espera de CI, e as sessoes que rodaram o gate mais vezes do que fizeram push.
 3. Leia o transcript de cada ocorrencia antes de conta-la.
-4. Agrupe as ocorrencias pela decisao que permitiu o erro. Gate repetido antes de publicar forma uma classe quando o repositorio leva a repeticao, como um hook que roda o gate de novo ou um gate que falha por motivo instavel. Regra de skill do catalogo descumprida em varios repositorios e candidata de `retro-skill`, nao desta skill.
+4. Agrupe as ocorrencias pela decisao que permitiu o erro. Gate repetido antes de publicar (`gate/push` acima de 2) forma uma classe quando o repositorio leva a repeticao, como um hook que roda o gate de novo ou um gate que falha por motivo instavel. Regra de skill do catalogo descumprida em varios repositorios e candidata de `retro-skill`, nao desta skill.
 5. Uma correcao explicita do usuario basta para investigar a classe. Para inferir recorrencia pelo historico, confirme duas ocorrencias distintas.
 6. Priorize as classes mais frequentes dentro do escopo pedido.
 
