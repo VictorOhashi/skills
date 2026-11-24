@@ -26,8 +26,12 @@ export const RENAMED: Readonly<Record<string, string>> = {
 /** How the next human prompt after a skill turn reads: a correction, anything else, or no prompt at all. */
 export type Reaction = "correction" | "other" | "none";
 
-/** Pointer back to the transcript record, so a retro can read the content locally. */
-type Source = { id: string; sessionId: string; file: string; repo: string; at: string };
+/**
+ * Pointer back to the transcript record, so a retro can read the content locally.
+ * `stale`: kept from a deleted transcript across a store version change, so its classification (reaction, prompt kind,
+ * check outcome, tool errors) may follow older rules. Counts include it; rates that depend on the classification leave it out.
+ */
+type Source = { id: string; sessionId: string; file: string; repo: string; at: string; stale?: true };
 
 /**
  * One skill load. Turn metrics cover the records from the load until the next human prompt,
@@ -98,21 +102,21 @@ export type Usage = {
 
 type Store = Usage & {
   /** Bumped when parsing changes, so the next ingest re-reads every transcript still on disk. */
-  version: 11;
+  version: 12;
   /** Transcript path -> mtime already ingested. */
   files: Record<string, number>;
 };
 
-/** Bump when a classification changes: the store is rebuilt, so old and new rules never mix (entries of deleted transcripts are lost). */
-const STORE_VERSION = 11;
+/** Bump when a classification changes: transcripts still on disk are read again; entries of deleted ones are kept as `stale`. */
+const STORE_VERSION = 12;
 const SKILL_HEADER = "Base directory for this skill: ";
 const INTERRUPT = "[Request interrupted by user";
 const WORKTREE = /\/\.(claude|codex)\/worktrees\/[^/]+/;
 // Accents are stripped before matching, so the Portuguese words carry none.
 // On the lowercased prompt without accents. "nao", "para" and "stop" are corrections only as the first word and alone
 // or followed by a few words: "nao esquece de rodar" and "para deploy" are requests.
-const CORRECTION_START = /^(?:(?:nao|nope|no)(?:[,.!;:]|$)|nao (?:era|e isso|foi isso|e assim|e bem isso|e para|e pra|gostei|ficou|(?:tinhamos|haviamos|tinha) (?:fechado|combinado|decidido))|na verdade|errad|incorret|desfaz|desfaca|revert|volt[ae] (?:como|atras|ao que|pro que|para o que)|(?:pare|para)(?: de\b| com\b|[,.!]|$)|stop(?: doing\b|[,.!]|$)|wrong\b|undo\b|that'?s not\b|deu erro\b)/;
-const CORRECTION_ANY = /\b(?:ainda (?:nao )?(?:esta |ta )?(?:correto|certo|legal|bom|com (?:o |esse |um )?problema)|ainda nao (?:gostei|e (?:o que|oque))|ainda falta|nao (?:ficou|ficaram)\b|ficou diferente|nao (?:apareceu|apareceram|mudou|carregou|carrega)\b|ainda n(?:ao)? foi\b|nao foi feito|continua (?:quebrand|igual|aparecendo|acontecendo)|(?:estou |to )?achando (?:muito|meio|bem) |notei que|ficou (?:errad|estranh|ruim|feio|cortad|quebrad|faltando)|nao gostei|nao deveria\b|faltou (?!algo|algum|alguma|nada|oque|o que)\w+|faltaram\b|incorret|horrivel|(?:esta|ta) quebrad|nao e (?:o que|oque) eu (?:quero|pedi)|esta errad|ta errad|errou\b|nao e isso|nao pedi|nao (?:esta |ta )?funcion|nao (?:esta|ta) (?:legal|bom|certo|correto)|nao deu certo|esqueceu\b(?! (?:algo|algum|alguma|nada))|(?:ta|esta) faltando(?! (?:algo|algum|alguma|nada))|(?:voce|vc) quebrou|quebrou (?:o|a|os|as) (?:build|ci|teste|testes|app|tela|deploy)|tudo errad|eu pedi\b|por que (?:voce|vc) (?:fez|mexeu|mudou|apagou|removeu|commitou|rodou|publicou)|faltou (?:o|a|os|as)\b|de novo o mesmo|mesmo erro|continua (?:quebrad|errad|falhand|com erro|dando erro)|ainda (?:esta |ta )?(?:quebrad|errad|falhand|com erro|dando erro)|you broke|not what i|you forgot|forgot to|is wrong|that'?s wrong|didn'?t work|doesn'?t work|not working|still (?:broken|failing)|same error)/;
+const CORRECTION_START = /^(?:(?:nao|nope|no)(?:[,.!;:]|$)|nao (?:era|e isso|foi isso|e assim|e bem isso|e para|e pra|gostei|ficou|(?:tinhamos|haviamos|tinha) (?:fechado|combinado|decidido))|na verdade(?!,? (?:pode|ta|esta|ficou|era) (?:seguir|bom|otimo|certo|assim|isso))|errad|incorret|desfaz|desfaca|revert|volt[ae] (?:como|atras|ao que|pro que|para o que)|(?:pare|para)(?: de\b| com\b|[,.!]|$)|stop(?: doing\b|[,.!]|$)|wrong\b|undo\b|that'?s not\b|deu erro\b)/;
+const CORRECTION_ANY = /\b(?:ainda (?:nao )?(?:esta |ta )?(?:correto|certo|legal|bom|com (?:o |esse |um )?problema)|ainda nao (?:gostei|e (?:o que|oque))|ainda falta|nao (?:ficou|ficaram)\b|ficou diferente|nao (?:apareceu|apareceram|mudou|carregou|carrega)\b|ainda n(?:ao)? foi\b|nao foi feito|continua (?:quebrand|igual|aparecendo|acontecendo)|(?:estou |to )?achando (?:muito|meio|bem) (?:estranh|ruim|feio|confus|lent|pesad|poluid|grande|pequen|apertad|complex|verbos|generic|amador)|notei que (?:\w+ ){0,5}(?:nao|ainda|continua|quebr|sumiu|sumiram|errad|falh)|ficou (?:errad|estranh|ruim|feio|cortad|quebrad|faltando)|nao gostei|nao deveria\b|faltou (?!algo|algum|alguma|nada|oque|o que|pouco)\w+|faltaram\b|incorret|horrivel|(?:esta|ta) quebrad|nao e (?:o que|oque) eu (?:quero|pedi)|esta errad|ta errad|errou\b|nao e isso|nao pedi|nao (?:esta |ta )?funcion|nao (?:esta|ta) (?:legal|bom|certo|correto)|nao deu certo|esqueceu\b(?! (?:algo|algum|alguma|nada))|(?:ta|esta) faltando(?! (?:algo|algum|alguma|nada))|(?:voce|vc) quebrou|quebrou (?:o|a|os|as) (?:build|ci|teste|testes|app|tela|deploy)|tudo errad|(?<!isso que )eu (?:te )?pedi\b|por que (?:voce|vc) (?:fez|mexeu|mudou|apagou|removeu|commitou|rodou|publicou)|faltou (?:o|a|os|as)\b|de novo o mesmo|mesmo erro|continua (?:quebrad|errad|falhand|com erro|dando erro)|ainda (?:esta |ta )?(?:quebrad|errad|falhand|com erro|dando erro)|you broke|not what i|you forgot|forgot to|is wrong|that'?s wrong|didn'?t work|doesn'?t work|not working|still (?:broken|failing)|same error)/;
 const FINDING = /(?:^|\n)[ \t>*-]*R\d+ \[(blocker|should|nit|pre-existing)\] `?([^\s`]+)`?[^\n]*/g;
 const SUBCOMMANDS = new Set(["pnpm", "npm", "yarn", "bun", "npx", "git", "gh", "docker", "make", "cargo", "go", "flutter", "dart", "uv", "pip", "poetry", "kubectl", "terraform", "supabase"]);
 const READ_ONLY = new Set(["cat", "ls", "head", "tail", "grep", "rg", "find", "sed", "awk", "wc", "stat", "file", "tree", "jq", "diff", "git status", "git log", "git show", "git diff", "git rev-parse", "git branch", "git ls-files", "git grep", "git ls-remote"]);
@@ -173,6 +177,14 @@ export function parseTranscript(file: string, text: string): Usage {
   let sessionCwd: string | undefined;
   // Subagent transcripts start with the parent's briefing, which is not a human prompt.
   const subagent = file.includes(`${path.sep}subagents${path.sep}`);
+  // A denied, blocked or interrupted call and a read that finds nothing are not errors of the turn.
+  const realError = (block: Line | undefined): boolean => {
+    if (block?.type !== "tool_result" || block.is_error !== true) return false;
+    const kind = failureKind(strings(block.content).join("\n"));
+    const command = typeof block.tool_use_id === "string" ? commands.get(block.tool_use_id) : undefined;
+    const probe = kind === "exit" && command !== undefined && commandSignature(command).split(" && ").every((step) => READ_ONLY.has(step));
+    return !NOT_RUN.has(kind) && kind !== "missing-path" && !probe;
+  };
   const close = (reaction: Reaction): void => {
     for (const { messages: _messages, ...run } of open) usage.runs.push({ ...run, reaction });
     open = [];
@@ -289,14 +301,14 @@ export function parseTranscript(file: string, text: string): Usage {
     }
     for (const run of open) {
       run.endedAt = at;
-      addMetrics(run, line, blocks);
+      addMetrics(run, line, blocks, realError);
     }
   }
   close("none");
   return usage;
 }
 
-function addMetrics(run: OpenRun, line: Line, blocks: Array<Line | undefined>): void {
+function addMetrics(run: OpenRun, line: Line, blocks: Array<Line | undefined>, realError: (block: Line | undefined) => boolean): void {
   const message = asRecord(line.message);
   if (line.type === "assistant" && message) {
     // Claude Code writes one record per content block, each repeating the message usage.
@@ -308,7 +320,7 @@ function addMetrics(run: OpenRun, line: Line, blocks: Array<Line | undefined>): 
     run.toolCalls += blocks.filter((block) => block?.type === "tool_use").length;
   }
   if (line.type === "user") {
-    run.toolErrors += blocks.filter((block) => block?.type === "tool_result" && block.is_error === true).length;
+    run.toolErrors += blocks.filter(realError).length;
     if (textOf(message?.content).startsWith(INTERRUPT)) run.interrupted = true;
   }
 }
@@ -617,7 +629,7 @@ async function loadStore(storePath: string): Promise<Store> {
   for (const key of ["runs", "prompts", "findings", "failures", "checks"] as const) {
     const entries = Array.isArray(raw[key]) ? (raw[key] as Source[]) : [];
     const kept: Source[] = [];
-    for (const entry of entries) if (typeof entry?.file === "string" && (await gone(entry))) kept.push(entry);
+    for (const entry of entries) if (typeof entry?.file === "string" && (await gone(entry))) kept.push({ ...entry, stale: true });
     (store[key] as Source[]) = kept;
   }
   return store;
@@ -762,7 +774,7 @@ function checksAfterLoad(skillRuns: SkillRun[], version: string, checks: CheckRu
 
 /** Checks other than pushes and CI waits whose command hides the exit code. */
 function unknownRate(checks: CheckRun[]): number {
-  return rate(checks.filter((entry) => entry.kind !== "push" && entry.kind !== "ci-wait"), (entry) => entry.outcome === "unknown");
+  return rate(checks.filter((entry) => entry.kind !== "push" && entry.kind !== "ci-wait" && !entry.stale), (entry) => entry.outcome === "unknown");
 }
 
 /**
@@ -777,8 +789,9 @@ export function repeatedGateRate(checks: CheckRun[]): number | undefined {
 }
 
 function runMetrics(group: SkillRun[]) {
-  const toolCalls = sum(group.map((run) => run.toolCalls));
-  const reacted = group.filter((run) => run.reaction !== "none");
+  const current = group.filter((run) => !run.stale);
+  const toolCalls = sum(current.map((run) => run.toolCalls));
+  const reacted = group.filter((run) => run.reaction !== "none" && !run.stale);
   return {
     runs: group.length,
     userRuns: group.filter((run) => run.trigger === "user").length,
@@ -786,7 +799,7 @@ function runMetrics(group: SkillRun[]) {
     repos: new Set(group.map((run) => run.repo)).size,
     medianSeconds: median(group.map((run) => (Date.parse(run.endedAt) - Date.parse(run.at)) / 1000)),
     medianOutputTokens: median(group.map((run) => run.outputTokens)),
-    toolErrorRate: toolCalls === 0 ? 0 : sum(group.map((run) => run.toolErrors)) / toolCalls,
+    toolErrorRate: toolCalls === 0 ? 0 : sum(current.map((run) => run.toolErrors)) / toolCalls,
     interruptRate: group.filter((run) => run.interrupted).length / group.length,
     correctionRate: reacted.length === 0 ? 0 : reacted.filter((run) => run.reaction === "correction").length / reacted.length,
     lastUsed: group.reduce((last, run) => (run.at > last ? run.at : last), ""),
@@ -808,7 +821,7 @@ export function repoReport(usage: Usage): RepoStats[] {
         repo,
         sessions: new Set(all.map((entry) => entry.sessionId)).size,
         prompts: typed.length,
-        correctionRate: typed.length === 0 ? 0 : typed.filter((entry) => entry.kind === "correction").length / typed.length,
+        correctionRate: rate(typed.filter((entry) => !entry.stale), (entry) => entry.kind === "correction"),
         interrupts: prompts.length - typed.length,
         blockers: findings.filter((entry) => entry.severity === "blocker").length,
         shoulds: findings.filter((entry) => entry.severity === "should").length,
@@ -884,8 +897,8 @@ export function checkReport(checks: CheckRun[]): CheckStats[] {
         medianSeconds: median(seconds),
         p90Seconds: percentile(seconds, 0.9),
         totalHours: sum(seconds) / 3600,
-        failRate: group.filter((entry) => entry.outcome === "fail").length / group.length,
-        unknownRate: group.filter((entry) => entry.outcome === "unknown").length / group.length,
+        failRate: rate(group.filter((entry) => !entry.stale), (entry) => entry.outcome === "fail"),
+        unknownRate: rate(group.filter((entry) => !entry.stale), (entry) => entry.outcome === "unknown"),
         medianPerSession: median(perSession),
         p90PerSession: percentile(perSession, 0.9),
       };
@@ -956,9 +969,41 @@ async function catalogNames(dir: string): Promise<{ names: string[]; commandOnly
   return { names: names.sort(), commandOnly: commandOnly.sort() };
 }
 
+/**
+ * The turn of a skill load as short text lines: the human prompt before it, then from the load to the next
+ * human prompt, where the signals are measured. A retro reads this instead of a whole transcript.
+ */
+export function turnOf(text: string, recordId: string, width = 400): string[] {
+  const lines = text.split("\n").map(parseLine).filter((line): line is Line => line !== undefined);
+  const load = lines.findIndex((line) => line.uuid === recordId);
+  if (load === -1) throw new Error(`No record ${recordId} in the transcript`);
+  const isHuman = (line: Line): boolean => humanPrompt(line) !== undefined && line.isSidechain !== true;
+  let start = load;
+  while (start > 0 && !isHuman(lines[start] as Line)) start -= 1;
+  let end = load + 1;
+  while (end < lines.length && !isHuman(lines[end] as Line)) end += 1;
+  const out: string[] = [];
+  const skipped = lines.slice(start + 1, load).filter((line) => line.type === "assistant").length;
+  for (const line of [lines[start] as Line, ...lines.slice(load, end + 1)]) {
+    if (line.uuid === recordId && skipped > 0) out.push(`... ${skipped} assistant records before the load`);
+    const at = typeof line.timestamp === "string" ? line.timestamp.slice(11, 19) : "";
+    const message = asRecord(line.message);
+    const clip = (value: string): string => value.replace(/\s+/g, " ").trim().slice(0, width);
+    if (isHuman(line)) out.push(`${at} user: ${clip(humanPrompt(line) ?? "")}`);
+    else if (line.uuid === recordId) out.push(`${at} skill loaded: ${clip(textOf(message?.content).split("\n")[0] ?? "")}`);
+    else for (const block of Array.isArray(message?.content) ? message.content.map(asRecord) : []) {
+      if (block?.type === "text" && line.type === "assistant") out.push(`${at} assistant: ${clip(String(block.text ?? ""))}`);
+      if (block?.type === "tool_use") out.push(`${at} tool ${String(block.name)}: ${clip(JSON.stringify(block.input ?? {}))}`);
+      if (block?.type === "tool_result" && block.is_error === true) out.push(`${at} tool error: ${clip(strings(block.content).join(" "))}`);
+    }
+  }
+  return out;
+}
+
 const USAGE = `Usage:
-  usage.mts skills [--skill <name>] [--since 30d] [--json]
-  usage.mts repos [--repo <name>] [--since 30d] [--json]
+  usage.mts skills [--skill <name>] [--since 30d] [--until <date>] [--json]
+  usage.mts repos [--repo <name>] [--since 30d] [--until <date>] [--json]
+  usage.mts turn <transcript> <record id>
 Options: --transcripts <dir> (default ~/.claude/projects), --store <dir> (default ~/.agents/usage), --catalog <skills dir>`;
 
 export async function main(argv: string[], print: (line: string) => void = console.log): Promise<number> {
@@ -969,6 +1014,7 @@ export async function main(argv: string[], print: (line: string) => void = conso
       skill: { type: "string" },
       repo: { type: "string" },
       since: { type: "string" },
+      until: { type: "string" },
       json: { type: "boolean" },
       transcripts: { type: "string" },
       store: { type: "string" },
@@ -976,10 +1022,16 @@ export async function main(argv: string[], print: (line: string) => void = conso
     },
   });
   const [command, ...rest] = positionals;
+  if (command === "turn" && rest.length === 2) {
+    for (const line of turnOf(await readFile(rest[0] as string, "utf8"), rest[1] as string)) print(line);
+    return 0;
+  }
   if ((command !== "skills" && command !== "repos") || rest.length > 0) throw new Error(USAGE);
   const all = await ingestUsage(values.store ?? DEFAULT_STORE, values.transcripts ?? DEFAULT_TRANSCRIPTS);
   const from = parseSince(values.since);
-  const usage: Usage = { runs: canonicalRuns(since(all.runs, from)), prompts: since(all.prompts, from), findings: since(all.findings, from), failures: since(all.failures, from), checks: since(all.checks, from) };
+  const to = values.until === undefined ? undefined : parseSince(values.until);
+  const window = <T extends Source>(entries: T[]): T[] => since(entries, from).filter((entry) => to === undefined || entry.at < to.toISOString());
+  const usage: Usage = { runs: canonicalRuns(window(all.runs)), prompts: window(all.prompts), findings: window(all.findings), failures: window(all.failures), checks: window(all.checks) };
   const emit = (value: unknown, lines: () => string[]): number => {
     if (values.json) print(JSON.stringify(value, null, 2));
     else for (const line of lines()) print(line);
@@ -989,14 +1041,16 @@ export async function main(argv: string[], print: (line: string) => void = conso
   if (command === "skills" && values.skill) {
     const skill = values.skill;
     const versions = versionReport(usage.runs, skill, usage.checks);
+    const all = versionReport(usage.runs.map((run) => (run.skill === skill ? { ...run, version: "all" } : run)), skill, usage.checks);
     const recent = usage.runs.filter((run) => run.skill === skill).slice(-20).reverse();
-    return emit({ skill, since: from.toISOString(), versions, recent }, () => [
+    return emit({ skill, since: from.toISOString(), until: to?.toISOString(), versions, all: all[0], recent }, () => [
       `${skill}: ${versions.length} versions since ${day(from.toISOString())}`,
-      ...table(["version", "first", "last", "runs", "turn s", "turn out", "tool err", "interr", "correct", "checks", "unknown", "gate rep"], versions.map((stats) => [
-        stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(Math.round(stats.medianSeconds)),
-        String(Math.round(stats.medianOutputTokens)), percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate),
-        String(stats.checks), percent(stats.unknownRate), optionalPercent(stats.repeatedGate),
-      ])),
+      ...table(["version", "first", "last", "runs", "turn s", "turn out", "tool err", "interr", "correct", "checks", "unknown", "gate rep"],
+        versions.concat(versions.length > 1 ? all : []).map((stats) => [
+          stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(Math.round(stats.medianSeconds)),
+          String(Math.round(stats.medianOutputTokens)), percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate),
+          String(stats.checks), percent(stats.unknownRate), optionalPercent(stats.repeatedGate),
+        ])),
       "checks, unknown and gate rep: checks from the version's load until another version loads; unknown is the mean of the session rates",
       "recent runs (repo, reaction, transcript, record of the load):",
       ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}  ${run.id}`),

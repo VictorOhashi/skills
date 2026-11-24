@@ -12,7 +12,7 @@ Altere o repositorio para que o proximo agente consiga seguir o caminho correto 
 ## Identificar a recorrencia
 
 1. Parta das correcoes do usuario, commits, reversoes, pareceres de revisao e instrucoes locais.
-2. Para achar candidatos nas sessoes de agente, rode `node {{SCRIPTS_DIR}}/usage.mts repos --repo <nome da pasta do checkout principal> [--since 30d] [--json]`. Ele lista, cada um com o transcript de origem:
+2. Para achar candidatos nas sessoes de agente, rode `node {{SCRIPTS_DIR}}/usage.mts repos --repo <nome da pasta do checkout principal> [--since 30d] [--until <data>] [--json]`. Ele lista, cada um com o transcript de origem:
    - as areas com mais achados `blocker` e `should` de revisores;
    - os comandos que mais falham, por tipo;
    - as correcoes do usuario;
@@ -37,6 +37,8 @@ Percorra os niveis em ordem e use o primeiro que resolva a classe de erro:
 ## Corrigir e comprovar
 
 Corrija as ocorrencias confirmadas no escopo autorizado. Para uma protecao executavel, reintroduza uma ocorrencia historica em uma copia temporaria. Execute o comando usado pelo projeto e confira que ele rejeita o erro pelo motivo esperado. Repita com a correcao e com um uso legitimo proximo. Meca o tempo do comando antes e depois e relate o custo da protecao. Use o mesmo comando localmente e na integracao continua quando ela ja rodar esse comando; inclui-lo na CI exige autorizacao explicita. Para uma instrucao local, confira se o criterio distingue a ocorrencia historica do uso legitimo e relate a dependencia de julgamento.
+
+Numa retro seguinte, compare a recorrencia da classe antes e depois da data da protecao, com `--until <data>` e `--since <data>`.
 
 Registre excecoes junto ao uso autorizado, com motivo, prazo e responsavel pela aprovacao.
 

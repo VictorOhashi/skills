@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { areaReport, busiestSessions, canonicalRuns, checkOf, DEFAULT_CATALOG, printedExit, repeatedGateRate, RENAMED, checkReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
+import { turnOf, areaReport, busiestSessions, canonicalRuns, checkOf, DEFAULT_CATALOG, printedExit, repeatedGateRate, RENAMED, checkReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
 
 const roots: string[] = [];
 after(async () => {
@@ -140,7 +140,8 @@ test("corrections are told apart from approvals and new requests", () => {
     "não esquece de rodar o lint", "pare o dev server quando terminar", "volta pro main e abre outra branch", "não precisa de print",
     "no main já tem isso?", "stop the dev server when done", "o teste ainda está passando?", "continua com o próximo item",
     "para que serve esse script?", "nao sei, decide você", "esqueceu algo?", "tá faltando algum passo?", "o deploy quebrou ontem?",
-    "quando deu erro no CI, o que aconteceu?",
+    "quando deu erro no CI, o que aconteceu?", "estou achando muito bom", "notei que o CI ficou mais rápido, valeu",
+    "perfeito, era isso que eu pedi", "faltou pouco! agora abre o PR", "na verdade, pode seguir assim mesmo",
   ]) {
     assert.equal(isCorrection(text), false, text);
   }
@@ -364,7 +365,13 @@ test("ingest keeps entries of deleted transcripts, drops fork copies and re-read
   const { readFile } = await import("node:fs/promises");
   const current = JSON.parse(await readFile(storePath, "utf8")) as { runs: unknown[] };
   await writeFile(storePath, JSON.stringify({ version: 1, files: {}, runs: current.runs }));
-  assert.deepEqual((await ingestUsage(store, transcripts)).runs.map((run) => run.skill), ["send", "mockup", "mockup"]);
+  assert.deepEqual((await ingestUsage(store, transcripts)).runs.map((run) => [run.skill, run.stale]), [["send", true], ["mockup", undefined], ["mockup", undefined]], "the deleted transcript's entry keeps its old classification, marked stale");
+});
+
+test("rates that depend on the classification leave stale entries out", () => {
+  const run = (reaction: "correction" | "other", stale?: true) => ({ id: "x", sessionId: "s", file: "f", repo: "app", at: "2026-11-01T10:00:00.000Z", skill: "send", version: "v", trigger: "model" as const, subagent: false, endedAt: "2026-11-01T10:01:00.000Z", outputTokens: 1, toolCalls: 1, toolErrors: 0, interrupted: false, reaction, ...(stale ? { stale } : {}) });
+  const [stats] = skillReport([run("other"), { ...run("correction", true), toolErrors: 1 }], ["send"]).skills;
+  assert.deepEqual(stats && [stats.runs, stats.correctionRate, stats.toolErrorRate], [2, 0, 0]);
 });
 
 test("reports compare skill versions and rank repositories", async () => {
@@ -452,4 +459,26 @@ test("the CLI ingests and prints the repository report", async () => {
   assert.equal(await main(["repos", ...args], (line) => lines.push(line)), 0);
   assert.match(lines.join("\n"), /^app\s+1\s+1\s+0%/m);
   await assert.rejects(main(["nope", ...args]), /Usage:/);
+});
+
+test("the turn reader prints the load turn and stops at the next human prompt", () => {
+  const text = jsonl([
+    human("first task", "2026-11-01T09:00:00.000Z"),
+    human("open the PR", "2026-11-01T10:00:00.000Z"),
+    skillLoad("send", "# Send", "2026-11-01T10:00:02.000Z", "toolu_1"),
+    assistant("m1", "2026-11-01T10:00:03.000Z", 10, [{ type: "text", text: "Running the gate" }, bash("b1", "pnpm test")]),
+    toolResult("2026-11-01T10:00:04.000Z", "b1", true, "Exit code 1\nboom"),
+    human("no, use the other file", "2026-11-01T10:01:00.000Z"),
+    assistant("m2", "2026-11-01T10:01:03.000Z", 10, [{ type: "text", text: "later work" }]),
+  ]);
+  const lines = turnOf(text, "load-send-2026-11-01T10:00:02.000Z");
+  assert.deepEqual(lines.map((line) => line.slice("10:00:00 ".length)), [
+    "user: open the PR",
+    "skill loaded: Base directory for this skill: /home/u/.claude/skills/send",
+    "assistant: Running the gate",
+    'tool Bash: {"command":"pnpm test"}',
+    "tool error: Exit code 1 boom",
+    "user: no, use the other file",
+  ]);
+  assert.throws(() => turnOf(text, "missing"), /No record missing/);
 });
