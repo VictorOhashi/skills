@@ -40,7 +40,7 @@ Na duvida sobre a justificativa de um desvio, ele e achado.
 **Atencao:** antes de aplicar uma troca de convencao, escale ao usuario com o custo, o ganho e a migracao. Sem aprovacao, relate a proposta sem aplica-la.
 
 5. **Estrutural.** Aplique cada achado estrutural aceito dentro do escopo em commit separado dos locais. Aplique a troca de convencao so se a migracao de todas as ocorrencias couber no escopo, e atualize na mesma mudanca o registro da convencao antiga: instrucao, regra de lint ou documento. Verifique pela entrada real do chamador afetado. Reverta a correcao que quebrar a verificacao e relate o achado como aberto. Relate o achado fora do escopo, inclusive a troca de convencao que nao cabe nele, e proponha uma issue com a migracao.
-6. Se houver reincidencia ou uma correcao explicita do usuario indicar uma classe de erro, proponha a prevencao. Quando autorizada, use `correct-repo` com o caso confirmado e um uso valido que a protecao deve preservar. Se a prevencao acompanha uma troca aplicada, entregue a `correct-repo` a regra nova e a antiga ja retirada.
+6. Se houver reincidencia ou uma correcao explicita do usuario indicar uma classe de erro, proponha a prevencao. Quando autorizada, use `retro-repo` com o caso confirmado e um uso valido que a protecao deve preservar. Se a prevencao acompanha uma troca aplicada, entregue a `retro-repo` a regra nova e a antiga ja retirada.
 7. Relate os achados aceitos, os rejeitados com o motivo, as rodadas extras, as correcoes aplicadas e os achados abertos.
 
 ## Criterios do revisor

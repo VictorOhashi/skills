@@ -1,5 +1,5 @@
 ---
-name: correct-repo
+name: retro-repo
 description: Identifica erros que agentes repetem no repositorio e corrige a causa que permite sua repeticao. Use ao investigar reincidencias ou transformar uma correcao do usuario em uma protecao local verificavel.
 ---
 
