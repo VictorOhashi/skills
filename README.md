@@ -34,8 +34,9 @@ As skills nao funcionam copiando a pasta como esta. Um build junta `SKILL.md` co
 ## Estrutura
 
 ```text
-scripts/                         # scripts compartilhados entre skills; testes em *.test.mts
+scripts/                         # scripts compartilhados entre skills e ferramentas do catalogo (lint, eval); testes em *.test.mts
 docs/                            # regras do repositorio e documentacao dos scripts
+evals/triggers.json              # casos do eval de acionamento
 skills/<skill>/
   SKILL.md                       # nucleo, vale em qualquer harness
   references/                    # opcional
@@ -56,6 +57,7 @@ skills/<skill>/
 pnpm install
 pnpm test
 pnpm typecheck
+node scripts/trigger-eval.mts    # eval de acionamento; chama o modelo
 ```
 
-O CI roda `pnpm test` e `pnpm typecheck` em todo PR.
+O CI roda `pnpm test` e `pnpm typecheck` em todo PR; `pnpm test` inclui o lint das skills. Ao mudar quais prompts devem carregar uma skill, acrescente o caso em `evals/triggers.json` e rode o eval antes e depois. Lint, eval e relatorio de uso: [docs/scripts.md](docs/scripts.md).

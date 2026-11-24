@@ -12,10 +12,10 @@ Transforme o uso real das skills em mudancas pequenas e comprovadas no catalogo.
 
 ## Fontes
 
-As duas fontes rodam no checkout de perfis registrado em `~/.agents/state.json` (campo `repoRoot`).
+O checkout do catalogo e o submodulo `skills/` do checkout de perfis registrado em `~/.agents/state.json` (campo `repoRoot`). Altere as skills e os casos de eval nele.
 
-- **Relatorio de uso:** `pnpm agents stats [--since 30d] [--json]`. Mede cada skill pelo turno em que carregou: tokens, erros de ferramenta, interrupcoes e correcao na proxima mensagem do usuario. Com `--skill <nome>`, compara as versoes da skill e lista os transcripts recentes.
-- **Eval de acionamento:** `pnpm agents eval [--skill <nome>]`. Roda os casos de `evals/triggers.json` contra a arvore de trabalho de `skills/` e salva o resultado. Na execucao completa, mostra os casos que mudaram desde a anterior.
+- **Relatorio de uso:** `node {{SCRIPTS_DIR}}/usage.mts skills [--since 30d] [--json]`. Mede cada skill pelo turno em que carregou: tokens, erros de ferramenta, interrupcoes e correcao na proxima mensagem do usuario. Com `--skill <nome>`, compara as versoes da skill e lista os transcripts recentes.
+- **Eval de acionamento:** `node scripts/trigger-eval.mts [--skill <nome>]`, na raiz do checkout do catalogo. Roda os casos de `evals/triggers.json` contra a arvore de trabalho e salva o resultado. Na execucao completa, mostra os casos que mudaram desde a anterior.
 
 **Nota:** a correcao e detectada por heuristica sobre o texto da proxima mensagem. Confirme cada caso no transcript antes de agir.
 
@@ -36,7 +36,7 @@ As duas fontes rodam no checkout de perfis registrado em `~/.agents/state.json` 
    - Comportamento: escreva no relatorio o caso observado e o resultado esperado.
 5. Altere a skill com a menor mudanca que remove a causa. Siga `writing-guide`.
 6. Rode o eval de acionamento completo de novo. Compare as falhas com as da linha de base do passo 1, nao com a ultima execucao. Aceite a mudanca so se nenhum caso que passava na linha de base falhou e o caso do passo 4 passou. Caso contrario, volte ao passo 5 ou descarte o candidato.
-7. Publique pelo fluxo de `send`: primeiro o PR do catalogo; depois o PR do checkout de perfis, com os novos casos de eval e a nova referencia do submodulo.
+7. Publique pelo fluxo de `send`: primeiro o PR do catalogo, com a skill e os casos de eval; depois o PR do checkout de perfis, com a nova referencia do submodulo.
 
 **Atencao:** o passo 7 consome a permissao **Publicar** de `send`.
 
