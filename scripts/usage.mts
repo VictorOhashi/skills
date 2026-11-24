@@ -98,13 +98,13 @@ export type Usage = {
 
 type Store = Usage & {
   /** Bumped when parsing changes, so the next ingest re-reads every transcript still on disk. */
-  version: 9;
+  version: 10;
   /** Transcript path -> mtime already ingested. */
   files: Record<string, number>;
 };
 
 /** Bump when a classification changes: the store is rebuilt, so old and new rules never mix (entries of deleted transcripts are lost). */
-const STORE_VERSION = 9;
+const STORE_VERSION = 10;
 const SKILL_HEADER = "Base directory for this skill: ";
 const INTERRUPT = "[Request interrupted by user";
 const WORKTREE = /\/\.(claude|codex)\/worktrees\/[^/]+/;
@@ -420,8 +420,12 @@ export function commandSignature(command: string): string {
 
 /** The exit code a command printed itself (`echo "exit $?"`, `EXIT=1`, `rc: 0`), from the last line that names one. */
 export function printedExit(output: string): number | undefined {
-  for (const line of output.trimEnd().split("\n").reverse()) {
-    const match = /\b(?:exit(?:[ _-]?code)?|status|rc|code)\b\s*[:=]?\s*(\d{1,3})\s*$/i.exec(line.trim()) ?? /^(\d{1,3})$/.exec(line.trim());
+  const lines = output.trimEnd().split("\n").map((line) => line.trim());
+  // A bare `echo $?` prints only the number, and only as the last line.
+  const bare = /^(\d{1,3})$/.exec(lines.at(-1) ?? "");
+  if (bare) return Number(bare[1]);
+  for (const line of lines.reverse()) {
+    const match = /\b(?:exit(?:[ _-]?code)?|status|rc|code)\b\s*[:=]?\s*(\d{1,3})$/i.exec(line);
     if (match) return Number(match[1]);
   }
   return undefined;
@@ -435,7 +439,7 @@ export function checkOf(command: string): { kind: CheckKind; masked: boolean; re
   const shell = shellText(command);
   const pipefail = /\bset\s+-\w*o\s+pipefail\b/.test(shell);
   const errexit = /\bset\s+-\w*e/.test(shell);
-  let found: { kind: CheckKind; masked: boolean } | undefined;
+  let found: { kind: CheckKind; masked: boolean; reported: boolean } | undefined;
   let pushes = false;
   for (const { program, args, next, last, orAfter } of shellSteps(command)) {
     // Flag values (`--filter test-kit`) name targets, not the check.
@@ -455,9 +459,11 @@ export function checkOf(command: string): { kind: CheckKind; masked: boolean; re
     }
     if (!kind || (found && CHECK_ORDER.indexOf(kind) >= CHECK_ORDER.indexOf(found.kind))) continue;
     const masked = next === "||" || orAfter || ((next === "|" || next === "|&") && !pipefail) || ((next === ";" || next === "\n") && !last && !errexit);
-    found = { kind, masked };
+    // `$?` after `check;` is the check's code; after `check | tail;` it is tail's, unless PIPESTATUS keeps it.
+    const reported = masked && (((next === ";" || next === "\n") && !orAfter && /\$\?/.test(command)) || /\$\{?PIPESTATUS/.test(command));
+    found = { kind, masked, reported };
   }
-  return found && { ...found, reported: found.masked && /\$\?|\$\{?PIPESTATUS/.test(command), pushes };
+  return found && { ...found, pushes };
 }
 
 function subcommand(args: string[]): string | undefined {
@@ -658,7 +664,7 @@ export type VersionStats = Omit<SkillStats, "skill" | "inCatalog" | "versions"> 
   firstUsed: string;
   checks: number;
   unknownRate: number;
-  gatePerPush: number | undefined;
+  repeatedGate: number | undefined;
 };
 
 export type RepoStats = {
@@ -675,7 +681,7 @@ export type RepoStats = {
   checkHours: number;
   /** Checks other than pushes and CI waits whose command hides the exit code. */
   unknownRate: number;
-  gatePerPush: number | undefined;
+  repeatedGate: number | undefined;
   lastActive: string;
 };
 
@@ -726,7 +732,7 @@ export function versionReport(runs: SkillRun[], skill: string, checks: CheckRun[
     .map(([version, group]) => {
       const sessions = new Set(group.map((run) => run.sessionId));
       const own = checks.filter((entry) => sessions.has(entry.sessionId));
-      return { version, ...runMetrics(group), firstUsed: group[0]?.at ?? "", checks: own.length, unknownRate: unknownRate(own), gatePerPush: gatePerPush(own) };
+      return { version, ...runMetrics(group), firstUsed: group[0]?.at ?? "", checks: own.length, unknownRate: unknownRate(own), repeatedGate: repeatedGateRate(own) };
     })
     .sort((a, b) => a.firstUsed.localeCompare(b.firstUsed));
 }
@@ -736,18 +742,15 @@ function unknownRate(checks: CheckRun[]): number {
   return rate(checks.filter((entry) => entry.kind !== "push" && entry.kind !== "ci-wait"), (entry) => entry.outcome === "unknown");
 }
 
-/** Local gate (`preflight`) runs per push, in sessions that pushed; undefined without a gate or a push. */
-export function gatePerPush(checks: CheckRun[]): number | undefined {
-  if (!checks.some((entry) => entry.kind === "preflight")) return undefined;
-  let gates = 0;
-  let pushes = 0;
-  for (const group of groupBy(checks, (entry) => entry.sessionId).values()) {
-    const pushed = group.filter((entry) => entry.kind === "push" || entry.pushes).length;
-    if (pushed === 0) continue;
-    pushes += pushed;
-    gates += group.filter((entry) => entry.kind === "preflight").length;
-  }
-  return pushes === 0 ? undefined : gates / pushes;
+/**
+ * Sessions that ran the local gate (`preflight`) more times than they pushed, over sessions that pushed and ran it:
+ * `verification` asks for one gate per publication. Undefined without such sessions.
+ */
+export function repeatedGateRate(checks: CheckRun[]): number | undefined {
+  const sessions = [...groupBy(checks, (entry) => entry.sessionId).values()]
+    .map((group) => ({ gates: group.filter((entry) => entry.kind === "preflight").length, pushes: group.filter((entry) => entry.kind === "push" || entry.pushes).length }))
+    .filter((session) => session.gates > 0 && session.pushes > 0);
+  return sessions.length === 0 ? undefined : rate(sessions, (session) => session.gates > session.pushes);
 }
 
 function runMetrics(group: SkillRun[]) {
@@ -789,7 +792,7 @@ export function repoReport(usage: Usage): RepoStats[] {
         failures: realFailures.length,
         checkHours: sum(checks.map((entry) => entry.seconds).filter((value) => value <= LATE_SECONDS)) / 3600,
         unknownRate: unknownRate(checks),
-        gatePerPush: gatePerPush(checks),
+        repeatedGate: repeatedGateRate(checks),
         lastActive: all.reduce((last, entry) => (entry.at > last ? entry.at : last), ""),
       };
     })
@@ -884,7 +887,7 @@ export function table(header: string[], rows: string[][]): string[] {
 }
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
-const ratio = (value: number | undefined): string => (value === undefined ? "-" : value.toFixed(1));
+const optionalPercent = (value: number | undefined): string => (value === undefined ? "-" : percent(value));
 const rate = <T,>(items: T[], hit: (item: T) => boolean): number => (items.length === 0 ? 0 : items.filter(hit).length / items.length);
 const day = (iso: string): string => iso.slice(0, 10);
 
@@ -966,12 +969,12 @@ export async function main(argv: string[], print: (line: string) => void = conso
     const recent = usage.runs.filter((run) => run.skill === skill).slice(-20).reverse();
     return emit({ skill, since: from.toISOString(), versions, recent }, () => [
       `${skill}: ${versions.length} versions since ${day(from.toISOString())}`,
-      ...table(["version", "first", "last", "runs", "turn s", "turn out", "tool err", "interr", "correct", "checks", "unknown", "gate/push"], versions.map((stats) => [
+      ...table(["version", "first", "last", "runs", "turn s", "turn out", "tool err", "interr", "correct", "checks", "unknown", "gate rep"], versions.map((stats) => [
         stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(Math.round(stats.medianSeconds)),
         String(Math.round(stats.medianOutputTokens)), percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate),
-        String(stats.checks), percent(stats.unknownRate), ratio(stats.gatePerPush),
+        String(stats.checks), percent(stats.unknownRate), optionalPercent(stats.repeatedGate),
       ])),
-      "checks, unknown and gate/push cover the sessions where the version loaded",
+      "checks, unknown and gate rep cover the sessions where the version loaded",
       "recent runs (repo, reaction, transcript, record of the load):",
       ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}  ${run.id}`),
     ]);
@@ -1034,9 +1037,9 @@ export async function main(argv: string[], print: (line: string) => void = conso
   const repos = repoReport(usage);
   return emit({ since: from.toISOString(), repos }, () => [
     `since ${day(from.toISOString())}: ${repos.length} repositories`,
-    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "unknown", "gate/push", "last"], repos.map((stats) => [
+    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "unknown", "gate rep", "last"], repos.map((stats) => [
       stats.repo, String(stats.sessions), String(stats.prompts), percent(stats.correctionRate), String(stats.interrupts),
-      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), percent(stats.unknownRate), ratio(stats.gatePerPush), day(stats.lastActive),
+      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), percent(stats.unknownRate), optionalPercent(stats.repeatedGate), day(stats.lastActive),
     ])),
   ]);
 }

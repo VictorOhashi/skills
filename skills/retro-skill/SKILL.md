@@ -14,8 +14,8 @@ Transforme o uso real das skills em mudancas pequenas e comprovadas no catalogo.
 
 O checkout do catalogo e o submodulo `skills/` do checkout de perfis registrado em `~/.agents/state.json` (campo `repoRoot`). Altere as skills e os casos de eval nele.
 
-- **Uso das skills:** `node {{SCRIPTS_DIR}}/usage.mts skills [--since 30d] [--json]`. Mede cada skill pelo turno em que carregou: tokens, erros de ferramenta, interrupcoes e correcao na proxima mensagem do usuario. Execucoes com o nome antigo de uma skill renomeada contam no nome atual. Com `--skill <nome>`, mostra por versao os sinais do turno e, nas sessoes em que a versao carregou, `checks`, `unknown` e `gate/push`. Tambem lista as execucoes recentes com transcript e registro da carga.
-- **Sinais por repositorio:** `node {{SCRIPTS_DIR}}/usage.mts repos [--repo <nome>]`. Mostra correcoes, achados de revisor, comandos que falham e tempo de verificacao. `unknown` e a parte das verificacoes que esconde o codigo de saida. `gate/push` e o numero de execucoes do gate local por push, nas sessoes que fizeram push.
+- **Uso das skills:** `node {{SCRIPTS_DIR}}/usage.mts skills [--since 30d] [--json]`. Mede cada skill pelo turno em que carregou: tokens, erros de ferramenta, interrupcoes e correcao na proxima mensagem do usuario. Execucoes com o nome antigo de uma skill renomeada contam no nome atual. Com `--skill <nome>`, mostra por versao os sinais do turno e, nas sessoes em que a versao carregou, `checks`, `unknown` e `gate rep`. Tambem lista as execucoes recentes com transcript e registro da carga.
+- **Sinais por repositorio:** `node {{SCRIPTS_DIR}}/usage.mts repos [--repo <nome>]`. Mostra correcoes, achados de revisor, comandos que falham e tempo de verificacao. `unknown` e a parte das verificacoes que esconde o codigo de saida. `gate rep` e a parte das sessoes com push que rodaram o gate local mais vezes do que fizeram push.
 - **Eval de acionamento:** `node scripts/trigger-eval.mts [--skill <nome>] [--baseline <run salvo>]`, na raiz do checkout do catalogo. Roda os casos de `evals/triggers.json` contra a arvore de trabalho. A execucao completa e salva. Caso que falha ou muda em relacao a linha de base roda mais duas vezes e passa por maioria. `--skill` inclui os prompts vizinhos que nao devem carregar a skill.
 - **Registro das retros:** `~/.agents/usage/retros.md`, fora do catalogo. Uma linha por candidato decidido, nesta tabela:
 
@@ -31,18 +31,21 @@ O checkout do catalogo e o submodulo `skills/` do checkout de perfis registrado 
 ## Procedimento
 
 1. **Linha de base.** Rode os dois relatorios dos ultimos 30 dias e o eval completo. Guarde o caminho do run salvo do eval.
-2. **Acompanhamento.** Para cada linha `aceita` do registro sem acompanhamento, rode `--skill` com `--since` cobrindo 30 dias antes da data da linha. Com pelo menos 10 execucoes depois da data, compare a versao anterior com as posteriores e anote:
-   - `melhorou` ou `piorou`: o sinal esperado mudou em pelo menos 3 ocorrencias confirmadas no transcript (correcao, interrupcao, erro de ferramenta), 10 pontos de `unknown` ou 0,5 de `gate/push`;
+2. **Acompanhamento.** Para cada linha `aceita` do registro sem acompanhamento, rode `--skill` com `--since` cobrindo 30 dias antes da data da linha. Com pelo menos 10 execucoes de cada lado da data, compare as taxas da versao anterior com as das versoes posteriores e anote:
+   - `melhorou` ou `piorou`: a taxa do sinal esperado mudou pelo menos 5 pontos (correcao, interrupcao, erro de ferramenta) ou 10 pontos (`unknown`, `gate rep`), e o lado com a taxa maior tem pelo menos 3 ocorrencias confirmadas no transcript;
    - `piorou` tambem quando a mediana de `turn out` subiu mais de 20%;
    - `igual` nos demais casos.
 
-   Com menos de 10 execucoes, deixe o acompanhamento vazio.
+   Com menos de 10 execucoes de um dos lados, ou se a versao anterior saiu do relatorio (store refeito ou transcripts apagados), deixe o acompanhamento vazio e anote o motivo.
 3. **Candidatos.** Escolha ate tres, nesta ordem:
    1. mudanca de retro anterior com acompanhamento `piorou`, ou caso de eval falhando. Para `piorou`, proponha reverter a mudanca ou corrigi-la;
    2. skill com pelo menos 10 execucoes e taxa de correcao ou de interrupcao de pelo menos o dobro da mediana das skills do catalogo com 10 execucoes ou mais, e de pelo menos 5%, com 3 ocorrencias ou mais;
-   3. regra de skill do catalogo descumprida em dois repositorios ou mais: `unknown` acima de 50%, contra a regra de pipefail de `verification`, ou `gate/push` acima de 2. Regra de um so repositorio fica com `retro-repo`;
+   3. regra de skill do catalogo descumprida em dois repositorios ou mais: `unknown` acima de 50%, contra a regra de pipefail de `verification`, ou `gate rep` acima de 25%, contra a regra de um gate por publicacao. Regra de um so repositorio fica com `retro-repo`;
    4. skill do catalogo ha mais de 30 dias e sem uso na janela, fora as que so carregam por comando. A data de entrada vem de `git log --follow --diff-filter=A --format=%as -- skills/<nome>/SKILL.md`;
-   5. nome fora do catalogo que ainda carrega e nao esta em `RENAMED` (`scripts/usage.mts`). Se `git log --all -- skills/<nome>` mostra o nome no catalogo, acrescente-o a `RENAMED` com o nome atual. Se nao mostra, e skill privada ou de plugin: ignore.
+   5. nome fora do catalogo que ainda carrega e nao esta em `RENAMED` (`scripts/usage.mts`). Procure o nome no historico do catalogo com `git log --all --stat -- 'skills/<nome>/*' '<nome>/*'`:
+      - renomeado para uma skill atual: acrescente-o a `RENAMED` com o nome atual;
+      - removido sem substituta: relate que a skill ainda carrega por instalacao antiga;
+      - ausente do historico: e skill privada ou de plugin; ignore.
 
    Pule o candidato que o registro marca como `descartada` ou `fora da skill` nos ultimos 30 dias, salvo se o sinal dobrou desde entao.
 4. **Causa.** Para cada candidato com uso, leia de dois a cinco transcripts listados pelo relatorio. Relate quantas das correcoes contadas os transcripts confirmaram. Classifique a causa:
@@ -51,7 +54,7 @@ O checkout do catalogo e o submodulo `skills/` do checkout de perfis registrado 
    - **Fora da skill:** o erro vem do repositorio de trabalho ou do perfil. Relate a causa e nao altere a skill.
 5. **Caso.** Registre o caso antes de alterar a skill:
    - Acionamento: acrescente a `evals/triggers.json` um prompt sintetico que reproduz o erro e um prompt vizinho com `avoid` para a skill.
-   - Comportamento: escreva, na conversa, o caso observado, o resultado esperado e o sinal que deve mudar (correcao, interrupcao, erro de ferramenta, `unknown` ou `gate/push`). Se a correcao for num script, escreva o teste que reproduz o caso.
+   - Comportamento: escreva, na conversa, o caso observado, o resultado esperado e o sinal que deve mudar (correcao, interrupcao, erro de ferramenta, `unknown` ou `gate rep`). Se a correcao for num script, escreva o teste que reproduz o caso.
 6. **Mudanca.** Altere a skill com a menor mudanca que remove a causa. Siga `writing-guide`. Conte as palavras do `SKILL.md` antes e depois. Se o texto crescer mais de 10%, retire texto equivalente ou justifique no PR.
 7. **Comprovar.** Enquanto ajusta a mudanca, rode `--skill <nome> --baseline <run do passo 1>`. Para aceitar, rode uma vez o eval completo com `--baseline <run do passo 1>`. Aceite a mudanca so se:
    - nenhum caso que passava na linha de base regrediu;

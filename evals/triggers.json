@@ -52,6 +52,9 @@
     { "prompt": "o que e o fluxo de full send?", "expect": null },
     { "prompt": "o que o conselho de revisores avalia?", "expect": null },
     { "prompt": "qual a diferenca entre git merge e git rebase?", "expect": null, "avoid": ["send", "send-full"] },
-    { "prompt": "como funciona code review em times grandes, em geral?", "expect": null, "avoid": ["review-loop"] }
+    { "prompt": "como funciona code review em times grandes, em geral?", "expect": null, "avoid": ["review-loop"] },
+    { "prompt": "commita essas mudancas localmente, sem push e sem PR", "expect": null, "avoid": ["send", "send-full"] },
+    { "prompt": "abre uma issue no GitHub descrevendo esse bug do login", "expect": null, "avoid": ["send", "github-read"] },
+    { "prompt": "revisa a gramatica e a ortografia desse paragrafo do README", "expect": null, "accept": ["writing-guide"], "avoid": ["review-loop"] }
   ]
 }

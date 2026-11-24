@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { areaReport, busiestSessions, canonicalRuns, checkOf, DEFAULT_CATALOG, gatePerPush, printedExit, RENAMED, checkReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
+import { areaReport, busiestSessions, canonicalRuns, checkOf, DEFAULT_CATALOG, printedExit, repeatedGateRate, RENAMED, checkReport, commandSignature, failureKind, failureReport, ingestUsage, isCorrection, main, parseTranscript, repoReport, skillReport, versionReport } from "./usage.mts";
 
 const roots: string[] = [];
 after(async () => {
@@ -253,9 +253,13 @@ test("a check whose exit code the command hides has an unknown outcome", () => {
 test("a check that prints its own exit code is judged by the printed code", () => {
   assert.equal(checkOf("pnpm preflight > log 2>&1; echo EXIT $?")?.reported, true);
   assert.equal(checkOf("pnpm test | tail -3")?.reported, false);
+  assert.equal(checkOf("pnpm test 2>&1 | tail -5; echo \"exit $?\"")?.reported, false, "$? after a pipe is the code of tail");
+  assert.equal(checkOf("pnpm test | tail -5; echo \"exit ${PIPESTATUS[0]}\"")?.reported, true);
   assert.equal(printedExit("...\nEXIT 1\n"), 1);
   assert.equal(printedExit("done\nexit=0"), 0);
   assert.equal(printedExit("Tests: 3 passed\n"), undefined);
+  assert.equal(printedExit("0\n"), 0);
+  assert.equal(printedExit("12\nall good"), undefined, "a bare number counts only as the last line");
   const { checks } = parseTranscript("/t/e.jsonl", jsonl([
     assistant("m1", "2026-11-01T10:00:00.000Z", 1, [bash("a", "pnpm preflight > log 2>&1; echo \"EXIT $?\"")]),
     toolResult("2026-11-01T10:01:00.000Z", "a", false, "EXIT 1"),
@@ -267,10 +271,14 @@ test("a check that prints its own exit code is judged by the printed code", () =
   assert.deepEqual(checks.map((check) => check.outcome), ["fail", "ok", "unknown"]);
 });
 
-test("the gate per push counts local gate runs in sessions that pushed", () => {
+test("a repeated gate is a session that ran the local gate more times than it pushed", () => {
   const run = (sessionId: string, kind: "preflight" | "push" | "test", pushes = false) => ({ id: "x", sessionId, file: "f", repo: "app", at: "2026-11-01T10:00:00.000Z", kind, command: "c", seconds: 1, background: false, outcome: "ok" as const, pushes });
-  assert.equal(gatePerPush([run("s1", "test"), run("s1", "push")]), undefined, "no gate in the repository");
-  assert.equal(gatePerPush([run("s1", "preflight"), run("s1", "preflight"), run("s1", "push"), run("s2", "preflight"), run("s2", "preflight", true), run("s3", "preflight")]), 2, "s3 never pushed");
+  assert.equal(repeatedGateRate([run("s1", "test"), run("s1", "push")]), undefined, "no gate in the repository");
+  assert.equal(repeatedGateRate([
+    run("s1", "preflight"), run("s1", "preflight"), run("s1", "push"),
+    run("s2", "preflight", true),
+    run("s3", "preflight"), run("s3", "preflight"),
+  ]), 0.5, "s3 never pushed; s2 ran the gate once for its push");
 });
 
 test("renamed skills point at current catalog skills", async () => {
