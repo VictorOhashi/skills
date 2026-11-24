@@ -38,12 +38,12 @@ Percorra os niveis em ordem e use o primeiro que resolva a classe de erro:
 
 Corrija as ocorrencias confirmadas no escopo autorizado. Para uma protecao executavel, reintroduza uma ocorrencia historica em uma copia temporaria. Execute o comando usado pelo projeto e confira que ele rejeita o erro pelo motivo esperado. Repita com a correcao e com um uso legitimo proximo. Meca o tempo do comando antes e depois e relate o custo da protecao. Use o mesmo comando localmente e na integracao continua quando ela ja rodar esse comando; inclui-lo na CI exige autorizacao explicita. Para uma instrucao local, confira se o criterio distingue a ocorrencia historica do uso legitimo e relate a dependencia de julgamento.
 
-Numa retro seguinte, compare a recorrencia da classe antes e depois da data da protecao, com `--until <data>` e `--since <data>`.
+Numa retro seguinte, compare a recorrencia da classe antes e depois da data da protecao, que fica na entrada da regra (Manter as regras locais). Conte as ocorrencias da classe nas duas janelas de `--repo`, `--until <data>` e `--since <data>`, so em sessoes fora de `stale`.
 
 Registre excecoes junto ao uso autorizado, com motivo, prazo e responsavel pela aprovacao.
 
 ## Manter as regras locais
 
-No arquivo de instrucoes do repositorio, ligue cada regra ativa ao mecanismo que a garante, no formato que o repositorio ja usa. Sem formato existente, proponha uma tabela curta antes de cria-la. Se uma regra escrita voltou a ser violada, procure a garantia que faltou. Retire a entrada quando a estrutura tornar o erro impossivel.
+No arquivo de instrucoes do repositorio, ligue cada regra ativa ao mecanismo que a garante e a data da protecao, no formato que o repositorio ja usa. Sem formato existente, proponha uma tabela curta antes de cria-la. Se uma regra escrita voltou a ser violada, procure a garantia que faltou. Retire a entrada quando a estrutura tornar o erro impossivel.
 
 Ao entregar, indique a evidencia de cada classe, a protecao escolhida, por que os niveis anteriores nao bastaram e o resultado da verificacao.

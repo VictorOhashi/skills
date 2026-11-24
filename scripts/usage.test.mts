@@ -142,6 +142,7 @@ test("corrections are told apart from approvals and new requests", () => {
     "para que serve esse script?", "nao sei, decide você", "esqueceu algo?", "tá faltando algum passo?", "o deploy quebrou ontem?",
     "quando deu erro no CI, o que aconteceu?", "estou achando muito bom", "notei que o CI ficou mais rápido, valeu",
     "perfeito, era isso que eu pedi", "faltou pouco! agora abre o PR", "na verdade, pode seguir assim mesmo",
+    "como eu pedi antes, agora faz o deploy",
   ]) {
     assert.equal(isCorrection(text), false, text);
   }
@@ -366,12 +367,16 @@ test("ingest keeps entries of deleted transcripts, drops fork copies and re-read
   const current = JSON.parse(await readFile(storePath, "utf8")) as { runs: unknown[] };
   await writeFile(storePath, JSON.stringify({ version: 1, files: {}, runs: current.runs }));
   assert.deepEqual((await ingestUsage(store, transcripts)).runs.map((run) => [run.skill, run.stale]), [["send", true], ["mockup", undefined], ["mockup", undefined]], "the deleted transcript's entry keeps its old classification, marked stale");
+  const lines: string[] = [];
+  await main(["skills", "--skill", "send", "--since", "2026-10-01", "--until", "2026-12-01", "--transcripts", transcripts, "--store", store], (line) => lines.push(line));
+  assert.match(lines[0] ?? "", /since 2026-10-01 until 2026-12-01$/);
+  assert.match(lines.join("\n"), /^all\s+2026-11-01\s+2026-11-01\s+1\s+1\s+\d+\s+\d+\s+-\s+0%\s+-\s/m, "a window of stale runs only shows no classification rate, not 0%");
 });
 
 test("rates that depend on the classification leave stale entries out", () => {
   const run = (reaction: "correction" | "other", stale?: true) => ({ id: "x", sessionId: "s", file: "f", repo: "app", at: "2026-11-01T10:00:00.000Z", skill: "send", version: "v", trigger: "model" as const, subagent: false, endedAt: "2026-11-01T10:01:00.000Z", outputTokens: 1, toolCalls: 1, toolErrors: 0, interrupted: false, reaction, ...(stale ? { stale } : {}) });
   const [stats] = skillReport([run("other"), { ...run("correction", true), toolErrors: 1 }], ["send"]).skills;
-  assert.deepEqual(stats && [stats.runs, stats.correctionRate, stats.toolErrorRate], [2, 0, 0]);
+  assert.deepEqual(stats && [stats.runs, stats.staleRuns, stats.correctionRate, stats.toolErrorRate], [2, 1, 0, 0]);
 });
 
 test("reports compare skill versions and rank repositories", async () => {
@@ -457,7 +462,7 @@ test("the CLI ingests and prints the repository report", async () => {
   const lines: string[] = [];
   const args = ["--transcripts", transcripts, "--store", path.join(tmp, "usage"), "--catalog", path.join(tmp, "none")];
   assert.equal(await main(["repos", ...args], (line) => lines.push(line)), 0);
-  assert.match(lines.join("\n"), /^app\s+1\s+1\s+0%/m);
+  assert.match(lines.join("\n"), /^app\s+1\s+0\s+1\s+0%/m);
   await assert.rejects(main(["nope", ...args]), /Usage:/);
 });
 
@@ -481,4 +486,18 @@ test("the turn reader prints the load turn and stops at the next human prompt", 
     "user: no, use the other file",
   ]);
   assert.throws(() => turnOf(text, "missing"), /No record missing/);
+});
+
+test("tool err counts failed runs, not denied calls, empty searches or missing paths", () => {
+  const { runs } = parseTranscript("/t/e.jsonl", jsonl([
+    human("fix it", "2026-11-01T10:00:00.000Z"),
+    skillLoad("send", "# Send", "2026-11-01T10:00:01.000Z"),
+    assistant("m1", "2026-11-01T10:00:02.000Z", 1, [bash("d1", "rm -rf build"), bash("g1", "grep -r foo src"), bash("c1", "cat missing.txt"), bash("t1", "pnpm test")]),
+    toolResult("2026-11-01T10:00:03.000Z", "d1", true, "Permission for this action was denied"),
+    toolResult("2026-11-01T10:00:03.100Z", "g1", true, "Exit code 1"),
+    toolResult("2026-11-01T10:00:03.200Z", "c1", true, "cat: missing.txt: No such file or directory"),
+    toolResult("2026-11-01T10:00:03.300Z", "t1", true, "Exit code 1\n1 failing"),
+    human("ok", "2026-11-01T10:01:00.000Z"),
+  ]));
+  assert.deepEqual(runs.map((run) => [run.toolCalls, run.toolErrors]), [[4, 1]]);
 });

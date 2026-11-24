@@ -116,7 +116,7 @@ const WORKTREE = /\/\.(claude|codex)\/worktrees\/[^/]+/;
 // On the lowercased prompt without accents. "nao", "para" and "stop" are corrections only as the first word and alone
 // or followed by a few words: "nao esquece de rodar" and "para deploy" are requests.
 const CORRECTION_START = /^(?:(?:nao|nope|no)(?:[,.!;:]|$)|nao (?:era|e isso|foi isso|e assim|e bem isso|e para|e pra|gostei|ficou|(?:tinhamos|haviamos|tinha) (?:fechado|combinado|decidido))|na verdade(?!,? (?:pode|ta|esta|ficou|era) (?:seguir|bom|otimo|certo|assim|isso))|errad|incorret|desfaz|desfaca|revert|volt[ae] (?:como|atras|ao que|pro que|para o que)|(?:pare|para)(?: de\b| com\b|[,.!]|$)|stop(?: doing\b|[,.!]|$)|wrong\b|undo\b|that'?s not\b|deu erro\b)/;
-const CORRECTION_ANY = /\b(?:ainda (?:nao )?(?:esta |ta )?(?:correto|certo|legal|bom|com (?:o |esse |um )?problema)|ainda nao (?:gostei|e (?:o que|oque))|ainda falta|nao (?:ficou|ficaram)\b|ficou diferente|nao (?:apareceu|apareceram|mudou|carregou|carrega)\b|ainda n(?:ao)? foi\b|nao foi feito|continua (?:quebrand|igual|aparecendo|acontecendo)|(?:estou |to )?achando (?:muito|meio|bem) (?:estranh|ruim|feio|confus|lent|pesad|poluid|grande|pequen|apertad|complex|verbos|generic|amador)|notei que (?:\w+ ){0,5}(?:nao|ainda|continua|quebr|sumiu|sumiram|errad|falh)|ficou (?:errad|estranh|ruim|feio|cortad|quebrad|faltando)|nao gostei|nao deveria\b|faltou (?!algo|algum|alguma|nada|oque|o que|pouco)\w+|faltaram\b|incorret|horrivel|(?:esta|ta) quebrad|nao e (?:o que|oque) eu (?:quero|pedi)|esta errad|ta errad|errou\b|nao e isso|nao pedi|nao (?:esta |ta )?funcion|nao (?:esta|ta) (?:legal|bom|certo|correto)|nao deu certo|esqueceu\b(?! (?:algo|algum|alguma|nada))|(?:ta|esta) faltando(?! (?:algo|algum|alguma|nada))|(?:voce|vc) quebrou|quebrou (?:o|a|os|as) (?:build|ci|teste|testes|app|tela|deploy)|tudo errad|(?<!isso que )eu (?:te )?pedi\b|por que (?:voce|vc) (?:fez|mexeu|mudou|apagou|removeu|commitou|rodou|publicou)|faltou (?:o|a|os|as)\b|de novo o mesmo|mesmo erro|continua (?:quebrad|errad|falhand|com erro|dando erro)|ainda (?:esta |ta )?(?:quebrad|errad|falhand|com erro|dando erro)|you broke|not what i|you forgot|forgot to|is wrong|that'?s wrong|didn'?t work|doesn'?t work|not working|still (?:broken|failing)|same error)/;
+const CORRECTION_ANY = /\b(?:ainda (?:nao )?(?:esta |ta )?(?:correto|certo|legal|bom|com (?:o |esse |um )?problema)|ainda nao (?:gostei|e (?:o que|oque))|ainda falta|nao (?:ficou|ficaram)\b|ficou diferente|nao (?:apareceu|apareceram|mudou|carregou|carrega)\b|ainda n(?:ao)? foi\b|nao foi feito|continua (?:quebrand|igual|aparecendo|acontecendo)|(?:estou |to )?achando (?:muito|meio|bem) (?:estranh|ruim|feio|confus|lent|pesad|poluid|grande|pequen|apertad|complex|verbos|generic|amador)|notei que (?:\w+ ){0,5}(?:nao|ainda|continua|quebr|sumiu|sumiram|errad|falh)|ficou (?:errad|estranh|ruim|feio|cortad|quebrad|faltando)|nao gostei|nao deveria\b|faltou (?!algo|algum|alguma|nada|oque|o que|pouco)\w+|faltaram\b|incorret|horrivel|(?:esta|ta) quebrad|nao e (?:o que|oque) eu (?:quero|pedi)|esta errad|ta errad|errou\b|nao e isso|nao pedi|nao (?:esta |ta )?funcion|nao (?:esta|ta) (?:legal|bom|certo|correto)|nao deu certo|esqueceu\b(?! (?:algo|algum|alguma|nada))|(?:ta|esta) faltando(?! (?:algo|algum|alguma|nada))|(?:voce|vc) quebrou|quebrou (?:o|a|os|as) (?:build|ci|teste|testes|app|tela|deploy)|tudo errad|(?<!isso que |^como )eu (?:te )?pedi\b|por que (?:voce|vc) (?:fez|mexeu|mudou|apagou|removeu|commitou|rodou|publicou)|faltou (?:o|a|os|as)\b|de novo o mesmo|mesmo erro|continua (?:quebrad|errad|falhand|com erro|dando erro)|ainda (?:esta |ta )?(?:quebrad|errad|falhand|com erro|dando erro)|you broke|not what i|you forgot|forgot to|is wrong|that'?s wrong|didn'?t work|doesn'?t work|not working|still (?:broken|failing)|same error)/;
 const FINDING = /(?:^|\n)[ \t>*-]*R\d+ \[(blocker|should|nit|pre-existing)\] `?([^\s`]+)`?[^\n]*/g;
 const SUBCOMMANDS = new Set(["pnpm", "npm", "yarn", "bun", "npx", "git", "gh", "docker", "make", "cargo", "go", "flutter", "dart", "uv", "pip", "poetry", "kubectl", "terraform", "supabase"]);
 const READ_ONLY = new Set(["cat", "ls", "head", "tail", "grep", "rg", "find", "sed", "awk", "wc", "stat", "file", "tree", "jq", "diff", "git status", "git log", "git show", "git diff", "git rev-parse", "git branch", "git ls-files", "git grep", "git ls-remote"]);
@@ -380,8 +380,10 @@ export function failureKind(output: string): FailureKind {
   return "exit";
 }
 
-/** Separator after the step (`&&`, `||`, `|`, `|&`, `;`, newline), and whether another step follows. */
-/** `after` is the raw text of the step that follows, kept before trivial steps such as `echo` are dropped. */
+/**
+ * Separator after the step (`&&`, `||`, `|`, `|&`, `;`, newline), and whether another step follows.
+ * `after` is the raw text of the step that follows, kept before trivial steps such as `echo` are dropped.
+ */
 type Step = { program: string; args: string[]; next: string | undefined; after: string; last: boolean; orAfter: boolean };
 
 /** The shell text with heredoc bodies and quoted text replaced, since they are data. */
@@ -671,6 +673,8 @@ export type SkillStats = {
   interruptRate: number;
   /** Turns whose next human prompt reads as a correction, over turns with a next prompt. */
   correctionRate: number;
+  /** Runs from deleted transcripts: counted, but left out of `toolErrorRate` and `correctionRate`. */
+  staleRuns: number;
   lastUsed: string;
 };
 
@@ -686,6 +690,8 @@ export type VersionStats = Omit<SkillStats, "skill" | "inCatalog" | "versions"> 
 export type RepoStats = {
   repo: string;
   sessions: number;
+  /** Sessions whose transcript was deleted: counted, but left out of the classification rates. */
+  staleSessions: number;
   prompts: number;
   correctionRate: number;
   interrupts: number;
@@ -802,6 +808,7 @@ function runMetrics(group: SkillRun[]) {
     toolErrorRate: toolCalls === 0 ? 0 : sum(current.map((run) => run.toolErrors)) / toolCalls,
     interruptRate: group.filter((run) => run.interrupted).length / group.length,
     correctionRate: reacted.length === 0 ? 0 : reacted.filter((run) => run.reaction === "correction").length / reacted.length,
+    staleRuns: group.length - current.length,
     lastUsed: group.reduce((last, run) => (run.at > last ? run.at : last), ""),
   };
 }
@@ -820,6 +827,7 @@ export function repoReport(usage: Usage): RepoStats[] {
       return {
         repo,
         sessions: new Set(all.map((entry) => entry.sessionId)).size,
+        staleSessions: new Set(all.filter((entry) => entry.stale).map((entry) => entry.sessionId)).size,
         prompts: typed.length,
         correctionRate: rate(typed.filter((entry) => !entry.stale), (entry) => entry.kind === "correction"),
         interrupts: prompts.length - typed.length,
@@ -1038,20 +1046,25 @@ export async function main(argv: string[], print: (line: string) => void = conso
     return 0;
   };
 
+  const span = `since ${day(from.toISOString())}${to ? ` until ${day(to.toISOString())}` : ""}`;
+  /** A classification rate over stale entries only has no data: print `-`, not 0%. */
+  const fresh = (value: number, total: number, stale: number): string => (total > 0 && stale === total ? "-" : percent(value));
+
   if (command === "skills" && values.skill) {
     const skill = values.skill;
     const versions = versionReport(usage.runs, skill, usage.checks);
     const all = versionReport(usage.runs.map((run) => (run.skill === skill ? { ...run, version: "all" } : run)), skill, usage.checks);
     const recent = usage.runs.filter((run) => run.skill === skill).slice(-20).reverse();
     return emit({ skill, since: from.toISOString(), until: to?.toISOString(), versions, all: all[0], recent }, () => [
-      `${skill}: ${versions.length} versions since ${day(from.toISOString())}`,
-      ...table(["version", "first", "last", "runs", "turn s", "turn out", "tool err", "interr", "correct", "checks", "unknown", "gate rep"],
-        versions.concat(versions.length > 1 ? all : []).map((stats) => [
-          stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(Math.round(stats.medianSeconds)),
-          String(Math.round(stats.medianOutputTokens)), percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate),
+      `${skill}: ${versions.length} versions ${span}`,
+      ...table(["version", "first", "last", "runs", "stale", "turn s", "turn out", "tool err", "interr", "correct", "checks", "unknown", "gate rep"],
+        versions.concat(all).map((stats) => [
+          stats.version, day(stats.firstUsed), day(stats.lastUsed), String(stats.runs), String(stats.staleRuns), String(Math.round(stats.medianSeconds)),
+          String(Math.round(stats.medianOutputTokens)), fresh(stats.toolErrorRate, stats.runs, stats.staleRuns), percent(stats.interruptRate),
+          fresh(stats.correctionRate, stats.runs, stats.staleRuns),
           String(stats.checks), percent(stats.unknownRate), optionalPercent(stats.repeatedGate),
         ])),
-      "checks, unknown and gate rep: checks from the version's load until another version loads; unknown is the mean of the session rates",
+      "stale: runs from deleted transcripts, left out of tool err and correct; checks, unknown and gate rep: checks from the version's load until another version loads; unknown is the mean of the session rates",
       "recent runs (repo, reaction, transcript, record of the load):",
       ...recent.map((run) => `  ${run.at.slice(0, 16)}  ${run.repo}  ${run.reaction}  ${run.file}  ${run.id}`),
     ]);
@@ -1062,11 +1075,11 @@ export async function main(argv: string[], print: (line: string) => void = conso
     const unused = report.unused.filter((name) => !catalog.commandOnly.includes(name));
     const unusedCommands = report.unused.filter((name) => catalog.commandOnly.includes(name));
     return emit({ since: from.toISOString(), skills: report.skills, unused, unusedCommands }, () => [
-      `since ${day(from.toISOString())}: ${usage.runs.length} skill runs`,
+      `${span}: ${usage.runs.length} skill runs`,
       ...table(["skill", "runs", "user", "sess", "repos", "vers", "turn s", "turn out", "tool err", "interr", "correct", "last"], report.skills.map((stats) => [
         stats.inCatalog ? stats.skill : `${stats.skill} *`, String(stats.runs), String(stats.userRuns), String(stats.sessions), String(stats.repos),
         String(stats.versions), String(Math.round(stats.medianSeconds)), String(Math.round(stats.medianOutputTokens)),
-        percent(stats.toolErrorRate), percent(stats.interruptRate), percent(stats.correctionRate), day(stats.lastUsed),
+        fresh(stats.toolErrorRate, stats.runs, stats.staleRuns), percent(stats.interruptRate), fresh(stats.correctionRate, stats.runs, stats.staleRuns), day(stats.lastUsed),
       ])),
       ...(report.skills.some((stats) => !stats.inCatalog) ? ["* not in the catalog: bundled, plugin or retired skill"] : []),
       ...(unused.length > 0 ? [`unused catalog skills: ${unused.join(", ")}`] : []),
@@ -1113,10 +1126,10 @@ export async function main(argv: string[], print: (line: string) => void = conso
   }
   const repos = repoReport(usage);
   return emit({ since: from.toISOString(), repos }, () => [
-    `since ${day(from.toISOString())}: ${repos.length} repositories`,
-    ...table(["repo", "sess", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "unknown", "gate rep", "last"], repos.map((stats) => [
-      stats.repo, String(stats.sessions), String(stats.prompts), percent(stats.correctionRate), String(stats.interrupts),
-      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), percent(stats.unknownRate), optionalPercent(stats.repeatedGate), day(stats.lastActive),
+    `${span}: ${repos.length} repositories`,
+    ...table(["repo", "sess", "stale", "prompts", "correct", "interr", "blocker", "should", "cmd fail", "check h", "unknown", "gate rep", "last"], repos.map((stats) => [
+      stats.repo, String(stats.sessions), String(stats.staleSessions), String(stats.prompts), fresh(stats.correctionRate, stats.sessions, stats.staleSessions), String(stats.interrupts),
+      String(stats.blockers), String(stats.shoulds), String(stats.failures), stats.checkHours.toFixed(1), fresh(stats.unknownRate, stats.sessions, stats.staleSessions), optionalPercent(stats.repeatedGate), day(stats.lastActive),
     ])),
   ]);
 }
