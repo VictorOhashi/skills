@@ -11,7 +11,9 @@ Altere o repositorio para que o proximo agente consiga seguir o caminho correto 
 
 ## Identificar a recorrencia
 
-Parta das correcoes do usuario, commits, reversoes, pareceres de revisao e instrucoes locais. Agrupe ocorrencias pela decisao que permitiu o erro. Uma correcao explicita do usuario basta para investigar a classe. Para inferir recorrencia pelo historico, confirme duas ocorrencias distintas. Priorize as classes mais frequentes dentro do escopo pedido.
+Parta das correcoes do usuario, commits, reversoes, pareceres de revisao e instrucoes locais. Para achar candidatos nas sessoes de agente, rode `node {{SCRIPTS_DIR}}/usage.mts repos --repo <nome da pasta do checkout principal> [--since 30d] [--json]`. Ele lista as areas com mais achados `blocker` e `should` de revisores, os comandos que mais falham por tipo e as correcoes do usuario, cada uma com o transcript de origem. Leia o transcript de cada ocorrencia antes de conta-la. Agrupe ocorrencias pela decisao que permitiu o erro. Uma correcao explicita do usuario basta para investigar a classe. Para inferir recorrencia pelo historico, confirme duas ocorrencias distintas. Priorize as classes mais frequentes dentro do escopo pedido.
+
+**Nota:** o relatorio aponta onde procurar, nao a classe. Area com muitos achados pode ser so area muito alterada, e falha de comando pode ser do ambiente.
 
 ## Escolher a protecao
 
