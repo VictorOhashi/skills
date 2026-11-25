@@ -12,6 +12,7 @@ Regras de onde fica cada script e como escreve-lo: "Pastas da skill" em [writing
 | `pr-state.mts` | `skills/send/scripts/` | Le o estado de um PR para o acompanhamento de `send`. |
 | `review-scope.mts` | `skills/review-loop/scripts/` | Fixa base, escopo e nivel da revisao. |
 | `github-read.mts` | `skills/github-read/scripts/` | Grava issue ou PR do GitHub numa pasta local. |
+| `doc-refs.mts` | `skills/ban-docs/scripts/` | Lista links, ancoras, caminhos e scripts citados em Markdown que nao resolvem. |
 
 ## Revisores isolados no Codex (`codex-review.mts`)
 
