@@ -180,7 +180,7 @@ test("humanApprovalsOnHead keeps only write-access humans on the current head", 
   assert.deepEqual(humanApprovalsOnHead(pr({ reviews })).map((r) => r.id), ["1"]);
 });
 
-test("riskSignals flags the high-risk areas of send-full by path", () => {
+test("riskSignals flags review-sensitive areas by path", () => {
   const signals = riskSignals([
     ".github/workflows/ci.yml", "infra/main.tf", "db/migrations/001.sql", "src/auth/session.ts",
     "src/payments/pix.ts", "src/author.ts", "src/ui/button.tsx",
@@ -256,7 +256,7 @@ test("fence outgrows any backtick run in the log", () => {
   assert.equal(fence("a ```` b"), "`````text\na ```` b\n`````");
 });
 
-test("render shows every feedback body, the delta and the merge gate", () => {
+test("render shows every feedback body, the delta and the merge context", () => {
   const before = pr();
   const after = pr({
     checks: [check({ result: "failure", detail: "FAILURE", jobId: 5 })],
@@ -286,6 +286,7 @@ test("render shows every feedback body, the delta and the merge gate", () => {
   // A body already shown and not on the head collapses to its first line.
   assert.match(text, /> First line _\(seen before; full text at the link\)_/);
   assert.doesNotMatch(text, /second line/);
+  assert.match(text, /## Merge context\n\nApply the review requirements configured by the repository\./);
   assert.match(text, /Human approval on the head: ana/);
   assert.match(text, /High-risk path signals: CI workflow .* \(partial: changed files were truncated\)/);
   assert.match(render(REF, before, assess(before, idle), undefined, new Map()), /none matched \(path heuristic\)/);
