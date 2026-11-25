@@ -11,7 +11,8 @@ As skills nao funcionam copiando a pasta como esta. Um build junta `SKILL.md` co
 | [`arena`](skills/arena/SKILL.md) | Disputa entre candidatos independentes para produzir o mesmo artefato. |
 | [`ban-bad-patterns`](skills/ban-bad-patterns/SKILL.md) | Aponta e corrige desvios de convencao, ferramenta e padrao de desenho, e convencoes que custam mais do que entregam. |
 | [`ban-bad-ui`](skills/ban-bad-ui/SKILL.md) | Aponta e corrige desvios da UI e falhas do design system. |
-| [`ban-comments`](skills/ban-comments/SKILL.md) | Remove comentarios e documentacao que nao se justificam. |
+| [`ban-comments`](skills/ban-comments/SKILL.md) | Remove comentarios que nao se justificam em arquivos de codigo. |
+| [`ban-docs`](skills/ban-docs/SKILL.md) | Remove e realoca documentacao em Markdown que nao muda o que o leitor faz. |
 | [`ban-legacy`](skills/ban-legacy/SKILL.md) | Aponta e retira codigo legado, migrando chamadores. |
 | [`ban-tests`](skills/ban-tests/SKILL.md) | Aponta e retira testes que nao protegem uma regra do produto. |
 | [`council`](skills/council/SKILL.md) | Conselho de revisores que da nota por rubrica ate a nota alvo. |

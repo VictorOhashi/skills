@@ -1,17 +1,17 @@
 ---
 name: ban-comments
-description: Remove comentarios e documentacao que nao se justificam em um diff ou conjunto de arquivos, por um revisor critico independente, e lista as pendencias de codigo que eles escondiam. Use quando o pedido for limpar narracao, codigo comentado, TODOs, justificativas de contorno e supressoes de lint.
+description: Remove comentarios que nao se justificam em arquivos de codigo de um diff ou conjunto de arquivos, por um revisor critico independente, e lista as pendencias de codigo que eles escondiam. Use quando o pedido for limpar narracao, codigo comentado, TODOs, justificativas de contorno e supressoes de lint.
 ---
 
 # Remocao de comentarios
 
-Um revisor independente remove todo comentario e trecho de documentacao fora das [Excecoes](#excecoes). Prevalece o julgamento dele: confira o resultado e rejeite so os casos listados no passo 2. Pendencia que exige mudar codigo e resolvida depois da remocao.
+Um revisor independente remove todo comentario fora das [Excecoes](#excecoes). Prevalece o julgamento dele: confira o resultado e rejeite so os casos listados no passo 2. Pendencia que exige mudar codigo e resolvida depois da remocao.
 
 **Atencao:** sem **Corrigir localmente** de `send`, rode o revisor so em modo parecer, entregue o relatorio sem aplicar nada e pergunte uma vez se deve aplicar.
 
 ## Escopo
 
-Use os arquivos ou o diff indicados. Sem indicacao, use o diff da branch contra a base do PR ou a branch padrao, incluindo a arvore de trabalho e os arquivos novos.
+Use os arquivos ou o diff indicados. Sem indicacao, use o diff da branch contra a base do PR ou a branch padrao, incluindo a arvore de trabalho e os arquivos novos. Documentacao em Markdown fica fora.
 
 ## Excecoes
 
@@ -23,8 +23,8 @@ So estes trechos ficam. Na duvida sobre a excecao, o trecho sai.
 - Motivo de uma decisao que parece errada, quando nome, tipo ou teste nao a tornam evidente e a alternativa obvia ja foi descartada.
 - Comportamento imposto por dependencia, plataforma, fornecedor ou protocolo que o projeto nao controla, verdadeiro hoje num caminho em uso.
 - Doc comment que define contrato de API publica.
+- Cabecalho de uso de script: sintaxe, argumentos e requisitos que o `--help` nao entrega.
 - Link de issue, RFC ou especificacao que explica uma restricao que o codigo nao expressa.
-- Documentacao operacional em uso, como instalacao, comandos e deploy, sem repetir o manifesto.
 
 ## Procedimento
 
@@ -43,7 +43,7 @@ So estes trechos ficam. Na duvida sobre a excecao, o trecho sai.
 
 Classifique cada trecho do escopo como **remover**, **manter** ou **pendencia**.
 
-- **Remover:** narracao, banner, historico da mudanca, nota ao revisor, codigo comentado, lista que repete manifesto ou arvore de arquivos, texto sem excecao comprovada. Nao reescreva o texto numa versao mais curta.
+- **Remover:** narracao, banner, historico da mudanca, nota ao revisor, codigo comentado, texto sem excecao comprovada. Nao reescreva o texto numa versao mais curta.
 - **Manter:** cite a excecao e a prova no codigo ou na fonte externa.
 - **Pendencia:** o comentario sai e a causa vira item de codigo, com arquivo, simbolo exato e a menor mudanca, em uma linha.
   - Surpresa do proprio codigo: renomear, extrair, tipar ou redesenhar ate o comportamento ficar evidente.

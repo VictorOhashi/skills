@@ -1,5 +1,5 @@
 name = "comment-reviewer"
-description = "Revisor critico e independente que aponta comentarios e documentacao injustificados."
+description = "Revisor critico e independente que aponta comentarios injustificados."
 model = "gpt-6.2-sol"
 model_reasoning_effort = "medium"
 developer_instructions = """
