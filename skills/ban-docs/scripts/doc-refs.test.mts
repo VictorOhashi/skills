@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { anchors, checkFile, main, repoRunnables, scriptOf } from "./doc-refs.mts";
+import { anchors, checkFile, citationsOf, main, repoLinks, repoRunnables, scriptOf } from "./doc-refs.mts";
 
 async function repo(files: Record<string, string>): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "doc-refs-"));
@@ -108,4 +108,38 @@ test("main skips a Markdown file deleted in the working tree", async () => {
   const out: string[] = [];
   assert.equal(await main([root], (line) => out.push(line)), 0);
   assert.deepEqual(out, ["doc-refs: ok (1 file(s))"]);
+});
+
+test("citationsOf finds lines naming the file or its symlink, outside both", async () => {
+  const root = await repo({
+    "AGENTS.md": "# Rules\nSee AGENTS.md.\n",
+    "src/a.ts": "// Every LLM call goes through llm (CLAUDE.md).\n",
+    "src/b.ts": "// root AGENTS.md logging rule\n",
+    "src/c.ts": "// nothing here\n",
+  });
+  await symlink("AGENTS.md", path.join(root, "CLAUDE.md"));
+  execFileSync("git", ["-C", root, "add", "."]);
+  await writeFile(path.join(root, "src/new.ts"), "// new file cites CLAUDE.md\n");
+  const links = await repoLinks(root);
+  const byTarget = await citationsOf(root, "AGENTS.md", links);
+  assert.deepEqual(byTarget.aliases, ["CLAUDE.md"]);
+  assert.deepEqual(byTarget.citations.map((c) => `${c.file}:${c.line}`), ["src/a.ts:1", "src/b.ts:1", "src/new.ts:1"]);
+  const byLink = await citationsOf(root, "CLAUDE.md", links);
+  assert.deepEqual(byLink.aliases, ["AGENTS.md"]);
+  assert.deepEqual(byLink.citations.map((c) => `${c.file}:${c.line}`), ["src/a.ts:1", "src/b.ts:1", "src/new.ts:1"]);
+  const out: string[] = [];
+  assert.equal(await main([root, "--cited-by", "--", "AGENTS.md"], (line) => out.push(line)), 0);
+  assert.deepEqual(out.slice(0, 2), ["AGENTS.md aliases: CLAUDE.md", "AGENTS.md <- src/a.ts:1: // Every LLM call goes through llm (CLAUDE.md)."]);
+  assert.equal(out.at(-1), "doc-refs: 3 citation(s) of 1 file(s)");
+});
+
+test("citationsOf reads non-ASCII file names and excludes bracketed paths literally", async () => {
+  const root = await repo({
+    "d/[id].md": "# Page\n",
+    "d/i.md": "See [id].md.\n",
+    "café.md": "See [id].md too.\n",
+  });
+  execFileSync("git", ["-C", root, "add", "."]);
+  const { citations } = await citationsOf(root, "d/[id].md", await repoLinks(root));
+  assert.deepEqual(citations.map((c) => `${c.file}:${c.line}`), ["café.md:1", "d/i.md:1"]);
 });
