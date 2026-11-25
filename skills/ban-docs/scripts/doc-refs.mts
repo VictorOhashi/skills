@@ -15,7 +15,7 @@ export type Finding = { file: string; line: number; kind: Kind; target: string; 
  * place of a missing script. `bins` is undefined when nothing is installed, so a shorthand like `pnpm tsc` is unknown.
  */
 export type Runnables = { scripts: Set<string>; bins: Set<string> | undefined };
-/** `shorthand` marks `pnpm <name>` and `yarn <name>`, which run a binary when no script has that name. */
+/** `shorthand` marks the forms that run a binary when no script has that name: `pnpm <name>`, `yarn [run] <name>`, `bun run <name>`. */
 export type ScriptRef = { name: string; shorthand: boolean };
 
 const exec = promisify(execFile);
@@ -52,7 +52,11 @@ export function scriptOf(command: string): ScriptRef | undefined {
   const [first, second] = args;
   let name: string | undefined;
   let shorthand = false;
-  if (first === "run" || first === "run-script") name = second;
+  if (first === "run" || first === "run-script") {
+    name = second;
+    // `yarn run` and `bun run` also run a binary; pnpm and npm require a script.
+    shorthand = tool === "yarn" || tool === "bun";
+  }
   else if (tool === "npm") name = first === "test" || first === "start" ? first : undefined;
   else if (tool === "pnpm" || tool === "yarn") {
     name = first && !(tool === "pnpm" ? PNPM_BUILTINS : YARN_BUILTINS).has(first) ? first : undefined;
@@ -212,10 +216,13 @@ export async function main(argv: string[], print: (line: string) => void = conso
   const [repoArg, ...fileArgs] = positionals;
   if (!repoArg) throw new Error("usage: node doc-refs.mts <repo> [-- <file>...]");
   const repo = path.resolve(repoArg);
-  const listed = fileArgs.length ? fileArgs.map((file) => path.relative(repo, path.resolve(repo, file))) : await gitFiles(repo, ["*.md", "*.mdx"]);
-  // The index still lists a file deleted in the working tree.
-  const files: string[] = [];
-  for (const file of listed) if (await exists(path.join(repo, file))) files.push(file);
+  let files: string[];
+  if (fileArgs.length) files = fileArgs.map((file) => path.relative(repo, path.resolve(repo, file)));
+  else {
+    // The index still lists a file deleted in the working tree.
+    files = [];
+    for (const file of await gitFiles(repo, ["*.md", "*.mdx"])) if (await exists(path.join(repo, file))) files.push(file);
+  }
   const runnables = await repoRunnables(repo);
   let count = 0;
   for (const file of files) {

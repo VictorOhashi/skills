@@ -23,7 +23,8 @@ test("scriptOf names the script a command runs and skips built-ins and other pac
   assert.deepEqual(scriptOf("npm test"), { name: "test", shorthand: false });
   assert.deepEqual(scriptOf("pnpm test"), { name: "test", shorthand: false });
   assert.deepEqual(scriptOf("yarn dev"), { name: "dev", shorthand: true });
-  assert.deepEqual(scriptOf("bun run check"), { name: "check", shorthand: false });
+  assert.deepEqual(scriptOf("bun run check"), { name: "check", shorthand: true });
+  assert.deepEqual(scriptOf("yarn run eslint"), { name: "eslint", shorthand: true });
   assert.equal(scriptOf("pnpm whoami"), undefined);
   assert.equal(scriptOf("pnpm install"), undefined);
   assert.equal(scriptOf("npm install"), undefined);
