@@ -5,7 +5,7 @@ description: Remove e realoca trechos de documentacao em Markdown que nao mudam 
 
 # Remocao de documentacao
 
-Um revisor independente remove ou move todo trecho de documentacao em Markdown fora das [Excecoes](#excecoes). Prevalece o julgamento dele: confira o resultado e rejeite so os casos listados no passo 4. Regra que uma verificacao pode garantir sai do texto e vira pendencia, resolvida depois da remocao.
+Um revisor independente remove ou move todo trecho de documentacao em Markdown fora das [Excecoes](#excecoes). Prevalece o julgamento dele: confira o resultado e rejeite so os casos listados no passo 4. Regra que uma verificacao pode garantir vira pendencia; o texto so sai quando a garantia entra na mesma entrega.
 
 **Atencao:** sem **Corrigir localmente** de `send`, rode o revisor so em modo parecer, entregue o relatorio sem aplicar nada e pergunte uma vez se deve aplicar.
 
@@ -23,6 +23,7 @@ So estes trechos ficam. Na duvida sobre a excecao, o trecho sai.
 - Ponteiro para outro arquivo com o gatilho de leitura: quando ler, nao so o que ha la.
 - Comando ou procedimento operacional em uso que o manifesto, as configs e o `--help` nao entregam.
 - Documentacao para leitor sem o codigo, como guia de uso de pacote publicado, de API publica ou de produto.
+- Trecho que codigo, lint, workflow ou outro documento cita como fonte.
 - Repeticao que o guia de redacao do repositorio registra como proposital.
 - Frontmatter ou metadado que uma ferramenta le.
 - Cabecalho de licenca ou aviso legal.
@@ -36,23 +37,32 @@ So estes trechos ficam. Na duvida sobre a excecao, o trecho sai.
    ```
 
    Ele lista link, ancora, caminho em codigo inline e script de `pnpm`, `npm`, `yarn` ou `bun` que nao resolvem. Cada linha e candidata: caminho gerado em execucao ou de outro repositorio tambem aparece. Saida com codigo 1 so indica que ha candidatas.
+
+   Liste tambem as citacoes dos arquivos do escopo:
+
+   ```bash
+   node <pasta da skill>/scripts/doc-refs.mts <repositorio> --cited-by -- <arquivos do escopo>
+   ```
+
+   Ele lista cada linha fora do escopo que nomeia um arquivo do escopo ou um symlink dele, como `CLAUDE.md` para `AGENTS.md`. Nao trunque nenhuma das duas saidas.
 2. Leia o guia de redacao, o glossario e os templates do repositorio, quando existirem.
-3. Inicie o revisor pela secao da harness. Entregue o escopo, as linhas da linha de base nos arquivos do escopo, o que o passo 2 achou, as Excecoes e os [Criterios do revisor](#criterios-do-revisor), sem reescreve-los.
+3. Inicie o revisor pela secao da harness. Entregue o escopo, as linhas da linha de base nos arquivos do escopo, as citacoes, o que o passo 2 achou, as Excecoes e os [Criterios do revisor](#criterios-do-revisor), sem reescreve-los.
 4. Confira o diff e o relatorio. Rejeite:
    - edicao fora de Markdown ou fora do escopo, exceto o destino de um **mover**;
-   - remocao de trecho com excecao comprovada;
+   - remocao de trecho com excecao comprovada, inclusive trecho que uma citacao do passo 1 trata como fonte;
+   - remocao de parte de frase, ou que deixa incoerente o trecho pai ou os irmaos, como lista anunciada, contagem ou cabecalho;
    - **mover** que altera o texto alem dos alvos relativos, ou que deixa no lugar ponteiro sem gatilho;
    - troca de referencia com alvo ambiguo ou errado;
    - pendencia com arquivo ou simbolo errado, fora do escopo ou motivo falso.
-   Trecho mantido sem prova da excecao sai. Remocao duvidosa fica removida.
+   Confira cada prova citada em pendencia, com a saida completa da busca. Trecho mantido sem prova da excecao sai. Remocao duvidosa fica removida.
 5. Se rejeitar uma edicao fora do escopo, um **mover**, uma troca de referencia ou uma pendencia, reverta o trecho e rode o revisor mais uma vez so sobre os trechos rejeitados, nomeando a falha. Se a segunda rodada tambem falhar, relate o trecho como aberto. Remocao de excecao comprovada so exige reverter.
 6. Rode o script de novo, como no passo 1, e compare com a linha de base pelo par arquivo e alvo, nao pela linha. Para cada referencia nova quebrada, reverta a edicao que a quebrou. Dentro do escopo, em vez de reverter, remova tambem o trecho que so existia por ela. Relate cada arquivo fora do escopo afetado. Rode tambem o lint de Markdown e o build de docs do repositorio, quando existirem.
-7. Resolva cada pendencia aceita dentro do escopo em commit separado da remocao, com a verificacao que ela exigir. Relate a pendencia fora do escopo e proponha uma issue.
+7. Resolva cada pendencia aceita dentro do escopo em commit separado da remocao, com a verificacao que ela exigir. Relate a pendencia fora do escopo, com o trecho mantido, e proponha uma issue.
 8. Relate a quantidade de remocoes, os trechos movidos com origem e destino, as trocas de referencia, os mantidos com a excecao, as rodadas extras, as pendencias resolvidas e as abertas.
 
 ## Criterios do revisor
 
-Classifique cada paragrafo, item de lista, linha de tabela ou secao do escopo como **remover**, **manter**, **mover** ou **pendencia**.
+Classifique cada paragrafo, item de lista, linha de tabela ou secao do escopo como **remover**, **manter**, **mover** ou **pendencia**. A menor unidade e a frase inteira: nao remova parte de frase. Antes de remover, confira o trecho pai e os irmaos: cabecalho ou frase que anuncia ou conta itens, e secao que ficaria vazia.
 
 - **Remover:**
   - instrucao que o leitor ja seguiria sem ela; o teste e se a linha muda o que ele faria;
@@ -66,9 +76,10 @@ Classifique cada paragrafo, item de lista, linha de tabela ou secao do escopo co
   - Instrucao persistente que vale so para um tipo de tarefa: para a skill ou o arquivo lido nessa tarefa.
   - Detalhe que so parte do procedimento usa: para um arquivo de referencia, com ponteiro e gatilho no lugar.
   - Sem destino pela convencao do repositorio, o trecho vira pendencia.
-- **Pendencia:** o trecho sai e a garantia vira item fora do texto, com arquivo e a menor mudanca, em uma linha.
+- **Pendencia:** a garantia vira item fora do texto, com arquivo e a menor mudanca, em uma linha. O trecho sai so quando a garantia cabe no escopo; fora dele, o trecho fica ate ela existir.
   - Regra que lint, hook, tipo, teste ou script pode garantir: construir a verificacao.
   - Texto que descreve comportamento que o codigo contradiz: o texto sai; se o codigo estiver errado, corrigir o codigo.
   - Trecho a mover sem destino: criar o destino.
 - Enfase, caixa alta, `IMPORTANTE`, `sempre` e `nunca` sao pista, nao prova. Confira no codigo, nas configs e no historico com `git log` e `git blame`.
+- Ao buscar o nome de um arquivo como prova, inclua os symlinks que as citacoes mostram.
 - Nao edite arquivo fora de Markdown. Nao aponte trecho fora do escopo nem proponha mudanca sem evidencia.
