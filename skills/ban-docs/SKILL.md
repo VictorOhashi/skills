@@ -44,7 +44,7 @@ So estes trechos ficam. Na duvida sobre a excecao, o trecho sai.
    node <pasta da skill>/scripts/doc-refs.mts <repositorio> --cited-by -- <arquivos do escopo>
    ```
 
-   Ele lista os symlinks de cada arquivo, como `CLAUDE.md` para `AGENTS.md`, e cada linha fora do proprio arquivo e dos seus symlinks que nomeia um deles. Nao trunque nenhuma das duas saidas.
+   Ele lista os symlinks de cada arquivo, como `CLAUDE.md` para `AGENTS.md`, e cada linha fora do proprio arquivo e dos seus symlinks que nomeia um deles, cada uma seguida das linhas vizinhas do arquivo que cita. Nao trunque nenhuma das duas saidas.
 2. Leia o guia de redacao, o glossario e os templates do repositorio, quando existirem.
 3. Inicie o revisor pela secao da harness. Entregue o escopo, as linhas da linha de base nos arquivos do escopo, as citacoes, o que o passo 2 achou, as Excecoes e os [Criterios do revisor](#criterios-do-revisor), sem reescreve-los.
 4. Confira o diff e o relatorio. Rejeite:
@@ -83,5 +83,6 @@ Classifique cada paragrafo, item de lista, linha de tabela ou secao do escopo co
   - Texto que descreve comportamento que o codigo contradiz, com o codigo errado: corrigir o codigo; o trecho fica.
   - Trecho a mover sem destino: criar o destino.
 - Enfase, caixa alta, `IMPORTANTE`, `sempre` e `nunca` sao pista, nao prova. Confira no codigo, nas configs e no historico com `git log` e `git blame`.
+- Leia cada citacao com as linhas recuadas abaixo dela: o trecho citado pode estar nomeado so nelas.
 - Ao buscar o nome de um arquivo como prova, inclua os symlinks que as citacoes mostram.
 - Nao edite arquivo fora de Markdown. Nao aponte trecho fora do escopo nem proponha mudanca sem evidencia.

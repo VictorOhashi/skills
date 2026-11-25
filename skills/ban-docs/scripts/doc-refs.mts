@@ -1,6 +1,7 @@
 // Lists references in Markdown files that no longer resolve: relative links and anchors, local paths
 // cited in inline code, and package scripts run through pnpm, npm, yarn or bun.
-// With --cited-by, lists instead every line outside each given file and its symlinks that names one of them.
+// With --cited-by, lists instead every line outside each given file and its symlinks that names one of them,
+// followed by the nearby lines of the citing file.
 // Usage: node doc-refs.mts <repo> [--cited-by] [-- <file>...]   (no files: every tracked or new .md/.mdx file)
 // Requires Node 22.18+ (type stripping) and git.
 import { execFile } from "node:child_process";
@@ -10,9 +11,18 @@ import path from "node:path";
 import { parseArgs, promisify } from "node:util";
 
 export type Kind = "link" | "anchor" | "path" | "script";
-/** A line outside the cited file that names it, or a symlink to it, by file name. */
-export type Citation = { cited: string; file: string; line: number; text: string };
+/** A line of the citing file near a citation. */
+export type ContextLine = { line: number; text: string };
+/** A line outside the cited file that names it, or a symlink to it, by file name, with the lines around it. */
+export type Citation = { cited: string; file: string; line: number; text: string; context: ContextLine[] };
 const CITATION_TEXT = 200;
+// A comment often names its subject on the line before the file name, or right after it.
+const CONTEXT_BEFORE = 2;
+const CONTEXT_AFTER = 1;
+
+function clip(text: string): string {
+  return text.length > CITATION_TEXT ? `${text.slice(0, CITATION_TEXT)}...` : text;
+}
 export type Finding = { file: string; line: number; kind: Kind; target: string; reason: string };
 /**
  * What the repository can run by name: scripts of every package.json, and the binaries pnpm and yarn run in
@@ -247,12 +257,27 @@ export async function citationsOf(repo: string, rel: string, links: Map<string, 
     },
   );
   const citations: Citation[] = [];
-  // With -z, each hit is `file\0line\0text`.
-  for (const hit of stdout.split("\n")) {
-    const [file, line, ...rest] = hit.split("\0");
-    if (!file || !line) continue;
-    const text = rest.join("\0").trim();
-    citations.push({ cited: rel, file, line: Number(line), text: text.length > CITATION_TEXT ? `${text.slice(0, CITATION_TEXT)}...` : text });
+  const sources = new Map<string, Promise<string[]>>();
+  // With -z, each hit is `file\0line\0text\n`. A file name may hold a newline but the text cannot,
+  // so the text ends at the first newline after its NUL.
+  const parts = stdout.split("\0");
+  let file = parts[0] ?? "";
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    const at = Number(parts[i]);
+    const tail = parts[i + 1] ?? "";
+    const end = tail.indexOf("\n");
+    const hitText = end === -1 ? tail : tail.slice(0, end);
+    const hitFile = file;
+    file = end === -1 ? "" : tail.slice(end + 1);
+    let source = sources.get(hitFile);
+    if (!source) sources.set(hitFile, (source = readFile(path.join(repo, hitFile), "utf8").then((text) => text.split("\n"))));
+    const lines = await source;
+    const context: ContextLine[] = [];
+    for (let n = Math.max(1, at - CONTEXT_BEFORE); n <= Math.min(lines.length, at + CONTEXT_AFTER); n++) {
+      const text = lines[n - 1]?.trim();
+      if (n !== at && text) context.push({ line: n, text: clip(text) });
+    }
+    citations.push({ cited: rel, file: hitFile, line: at, text: clip(hitText.trim()), context });
   }
   return { aliases: own.filter((file) => file !== rel), citations };
 }
@@ -277,7 +302,10 @@ export async function main(argv: string[], print: (line: string) => void = conso
       const { aliases, citations } = await citationsOf(repo, file, links);
       if (aliases.length) print(`${file} aliases: ${aliases.join(", ")}`);
       total += citations.length;
-      for (const citation of citations) print(`${citation.cited} <- ${citation.file}:${citation.line}: ${citation.text}`);
+      for (const citation of citations) {
+        print(`${citation.cited} <- ${citation.file}:${citation.line}: ${citation.text}`);
+        for (const near of citation.context) print(`    ${near.line}: ${near.text}`);
+      }
     }
     print(`doc-refs: ${total} citation(s) of ${files.length} file(s)`);
     return 0;

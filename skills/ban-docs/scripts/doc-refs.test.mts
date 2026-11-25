@@ -133,6 +133,22 @@ test("citationsOf finds lines naming the file or its symlink, outside both", asy
   assert.equal(out.at(-1), "doc-refs: 3 citation(s) of 1 file(s)");
 });
 
+test("citationsOf keeps the nearby non-empty lines of the citing file", async () => {
+  const root = await repo({
+    "AGENTS.md": "# Rules\n",
+    "src/a.ts": "// header\n\n// duplicated against the reuse rule of\n// AGENTS.md, see review.\n// next line\n// far\n",
+  });
+  execFileSync("git", ["-C", root, "add", "."]);
+  const { citations } = await citationsOf(root, "AGENTS.md", await repoLinks(root));
+  assert.deepEqual(citations[0]?.context, [
+    { line: 3, text: "// duplicated against the reuse rule of" },
+    { line: 5, text: "// next line" },
+  ]);
+  const out: string[] = [];
+  await main([root, "--cited-by", "--", "AGENTS.md"], (line) => out.push(line));
+  assert.deepEqual(out.slice(0, 3), ["AGENTS.md <- src/a.ts:4: // AGENTS.md, see review.", "    3: // duplicated against the reuse rule of", "    5: // next line"]);
+});
+
 test("citationsOf reads non-ASCII file names and excludes bracketed paths literally", async () => {
   const root = await repo({
     "d/[id].md": "# Page\n",
@@ -142,4 +158,8 @@ test("citationsOf reads non-ASCII file names and excludes bracketed paths litera
   execFileSync("git", ["-C", root, "add", "."]);
   const { citations } = await citationsOf(root, "d/[id].md", await repoLinks(root));
   assert.deepEqual(citations.map((c) => `${c.file}:${c.line}`), ["café.md:1", "d/i.md:1"]);
+  await writeFile(path.join(root, "new\nline.md"), "x\nSee [id].md here.\n");
+  const withNewline = await citationsOf(root, "d/[id].md", await repoLinks(root));
+  const hit = withNewline.citations.find((c) => c.file === "new\nline.md");
+  assert.deepEqual(hit && { line: hit.line, text: hit.text, context: hit.context }, { line: 2, text: "See [id].md here.", context: [{ line: 1, text: "x" }] });
 });
