@@ -23,6 +23,7 @@ So estes trechos ficam. Na duvida sobre a excecao, o trecho sai.
 - Motivo de uma decisao que parece errada, quando nome, tipo ou teste nao a tornam evidente e a alternativa obvia ja foi descartada.
 - Comportamento imposto por dependencia, plataforma, fornecedor ou protocolo que o projeto nao controla, verdadeiro hoje num caminho em uso.
 - Doc comment que define contrato de API publica.
+- Cabecalho de uso de script: sintaxe, argumentos e requisitos que o `--help` nao entrega.
 - Link de issue, RFC ou especificacao que explica uma restricao que o codigo nao expressa.
 
 ## Procedimento

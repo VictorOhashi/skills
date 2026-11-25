@@ -1,6 +1,6 @@
 ## Codex
 
-O revisor roda em sessao somente leitura e devolve a lista de remocoes e de **mover** com arquivo, linha e trecho citado, mais o destino de cada **mover**. Com **Corrigir localmente**, aplique a lista sem reavalia-la, localizando cada trecho pelo texto citado, e siga o passo 4 sobre o diff resultante.
+O revisor roda em sessao somente leitura e devolve a lista de remocoes, de **mover** e de trocas de referencia com arquivo, linha e trecho citado, mais o destino de cada **mover** e o trecho novo de cada troca. Com **Corrigir localmente**, aplique a lista sem reavalia-la, localizando cada trecho pelo texto citado, e siga o passo 4 sobre o diff resultante.
 
 Crie a pasta de artefatos de `ban-docs` pela regra do perfil. Inicie a sessao isolada pelo executor compartilhado:
 

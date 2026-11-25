@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { anchors, checkFile, repoScripts, scriptOf } from "./doc-refs.mts";
+import { anchors, checkFile, main, repoRunnables, scriptOf } from "./doc-refs.mts";
 
 async function repo(files: Record<string, string>): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "doc-refs-"));
@@ -17,12 +17,14 @@ async function repo(files: Record<string, string>): Promise<string> {
 }
 
 test("scriptOf names the script a command runs and skips built-ins and other packages", () => {
-  assert.equal(scriptOf("pnpm agents sync work"), "agents");
-  assert.equal(scriptOf("pnpm run build"), "build");
-  assert.equal(scriptOf("npm run lint -- --fix"), "lint");
-  assert.equal(scriptOf("npm test"), "test");
-  assert.equal(scriptOf("yarn dev"), "dev");
-  assert.equal(scriptOf("bun run check"), "check");
+  assert.deepEqual(scriptOf("pnpm agents sync work"), { name: "agents", shorthand: true });
+  assert.deepEqual(scriptOf("pnpm run build"), { name: "build", shorthand: false });
+  assert.deepEqual(scriptOf("npm run lint -- --fix"), { name: "lint", shorthand: false });
+  assert.deepEqual(scriptOf("npm test"), { name: "test", shorthand: false });
+  assert.deepEqual(scriptOf("pnpm test"), { name: "test", shorthand: false });
+  assert.deepEqual(scriptOf("yarn dev"), { name: "dev", shorthand: true });
+  assert.deepEqual(scriptOf("bun run check"), { name: "check", shorthand: false });
+  assert.equal(scriptOf("pnpm whoami"), undefined);
   assert.equal(scriptOf("pnpm install"), undefined);
   assert.equal(scriptOf("npm install"), undefined);
   assert.equal(scriptOf("bun test"), undefined);
@@ -38,6 +40,7 @@ test("anchors ignores headings inside fences and numbers repeats", () => {
 test("checkFile reports broken links, anchors, paths and scripts with their lines", async () => {
   const root = await repo({
     "package.json": JSON.stringify({ scripts: { test: "node --test", agents: "node src/cli.ts" } }),
+    "node_modules/.bin/vitest": "",
     "src/cli.ts": "",
     "docs/guide.md": "# Guia\n## Build\n",
     "AGENTS.md": [
@@ -55,7 +58,7 @@ test("checkFile reports broken links, anchors, paths and scripts with their line
       "```",
     ].join("\n"),
   });
-  const findings = (await checkFile(root, "AGENTS.md", await repoScripts(root))).map((f) => `${f.line} ${f.kind} ${f.target}`);
+  const findings = (await checkFile(root, "AGENTS.md", await repoRunnables(root))).map((f) => `${f.line} ${f.kind} ${f.target}`);
   assert.deepEqual(findings, [
     "1 link docs/missing.md",
     "2 anchor docs/guide.md#deploy",
@@ -67,14 +70,41 @@ test("checkFile reports broken links, anchors, paths and scripts with their line
   ]);
 });
 
-test("checkFile accepts a script of any package in the repository and skips scripts without a manifest", async () => {
+test("checkFile accepts a script of any package and an installed binary for the shorthand form", async () => {
+  const root = await repo({
+    "package.json": JSON.stringify({ scripts: { lint: "x" }, devDependencies: { prisma: "1" } }),
+    "node_modules/.bin/tsc": "",
+    "apps/web/package.json": JSON.stringify({ scripts: { dev: "x" } }),
+    "README.md": "Em `apps/web`, rode `pnpm dev`, `pnpm lint`, `pnpm tsc`, `pnpm prisma migrate`, `pnpm run tsc` e `pnpm build`.\n",
+  });
+  assert.deepEqual((await checkFile(root, "README.md", await repoRunnables(root))).map((f) => f.target), ["pnpm run tsc", "pnpm build"]);
+});
+
+test("checkFile leaves the shorthand form unknown without installed binaries, and scripts without a manifest", async () => {
   const root = await repo({
     "package.json": JSON.stringify({ scripts: { lint: "x" } }),
-    "apps/web/package.json": JSON.stringify({ scripts: { dev: "x" } }),
-    "README.md": "Em `apps/web`, rode `pnpm dev`, `pnpm lint` e `pnpm build`.\n",
+    "README.md": "Rode `pnpm tsc` e `pnpm run tsc`.\n",
   });
-  assert.deepEqual((await checkFile(root, "README.md", await repoScripts(root))).map((f) => f.target), ["pnpm build"]);
+  assert.deepEqual((await checkFile(root, "README.md", await repoRunnables(root))).map((f) => f.target), ["pnpm run tsc"]);
   const bare = await repo({ "README.md": "Rode `pnpm dev`.\n" });
-  assert.equal(await repoScripts(bare), undefined);
+  assert.equal(await repoRunnables(bare), undefined);
   assert.deepEqual(await checkFile(bare, "README.md", undefined), []);
+});
+
+test("checkFile resolves cited paths from every folder between the file and the root", async () => {
+  const root = await repo({
+    "src/main.ts": "",
+    "packages/x/src/index.ts": "",
+    "packages/x/docs/guide.md": "Veja `src/index.ts` e `src/gone.ts`.\n",
+  });
+  assert.deepEqual((await checkFile(root, "packages/x/docs/guide.md")).map((f) => f.target), ["src/gone.ts"]);
+});
+
+test("main skips a Markdown file deleted in the working tree", async () => {
+  const root = await repo({ "a.md": "[b](b.md)\n", "b.md": "# B\n" });
+  execFileSync("git", ["-C", root, "add", "."]);
+  await rm(path.join(root, "a.md"));
+  const out: string[] = [];
+  assert.equal(await main([root], (line) => out.push(line)), 0);
+  assert.deepEqual(out, ["doc-refs: ok (1 file(s))"]);
 });

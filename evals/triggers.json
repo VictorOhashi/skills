@@ -10,7 +10,7 @@
     { "prompt": "tira prints da tela de checkout antes e depois e anexa no PR", "expect": "pr-prints" },
     { "prompt": "preciso das evidencias visuais dessa mudanca de layout no PR", "expect": "pr-prints" },
     { "prompt": "roda a revisao final independente antes de eu publicar", "expect": "review-loop", "avoid": ["ban-bad-patterns", "ban-comments", "ban-docs", "ban-tests"] },
-    { "prompt": "antes do push final, passa um revisor independente nessa entrega", "expect": "review-loop", "avoid": ["ban-bad-patterns", "ban-comments", "ban-tests"] },
+    { "prompt": "antes do push final, passa um revisor independente nessa entrega", "expect": "review-loop", "avoid": ["ban-bad-patterns", "ban-comments", "ban-docs", "ban-tests"] },
     { "prompt": "confirma que essa mudanca realmente funciona antes de dizer que terminou", "expect": "verification" },
     { "prompt": "qual o menor teste que comprova esse fix?", "expect": "verification", "avoid": ["implementation"] },
     { "prompt": "analisa essa issue e me propoe um plano antes de implementar", "expect": "planning", "accept": ["github-read"] },

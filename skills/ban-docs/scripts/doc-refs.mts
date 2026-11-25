@@ -4,12 +4,19 @@
 // Requires Node 22.18+ (type stripping) and git.
 import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs, promisify } from "node:util";
 
 export type Kind = "link" | "anchor" | "path" | "script";
 export type Finding = { file: string; line: number; kind: Kind; target: string; reason: string };
+/**
+ * What the repository can run by name: scripts of every package.json, and the binaries pnpm and yarn run in
+ * place of a missing script. `bins` is undefined when nothing is installed, so a shorthand like `pnpm tsc` is unknown.
+ */
+export type Runnables = { scripts: Set<string>; bins: Set<string> | undefined };
+/** `shorthand` marks `pnpm <name>` and `yarn <name>`, which run a binary when no script has that name. */
+export type ScriptRef = { name: string; shorthand: boolean };
 
 const exec = promisify(execFile);
 const LINK = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
@@ -26,6 +33,10 @@ const PNPM_BUILTINS = new Set([
   "fetch", "help", "i", "import", "init", "install", "install-test", "it", "licenses", "link", "list", "ln", "ls",
   "outdated", "pack", "patch", "patch-commit", "prune", "publish", "rb", "rebuild", "remove", "rm", "root", "self-update",
   "server", "setup", "store", "un", "uninstall", "unlink", "up", "update", "upgrade", "why", "x",
+  // Forwarded to npm.
+  "access", "adduser", "bugs", "cache", "completion", "deprecate", "dist-tag", "docs", "edit", "info", "login", "logout",
+  "org", "owner", "ping", "prefix", "profile", "repo", "search", "star", "stars", "team", "token", "unpublish", "version",
+  "view", "whoami",
 ]);
 const YARN_BUILTINS = new Set([
   "add", "audit", "autoclean", "bin", "cache", "check", "config", "constraints", "create", "dedupe", "dlx", "exec",
@@ -35,17 +46,20 @@ const YARN_BUILTINS = new Set([
 ]);
 
 /** The script a package-manager command runs, or undefined when it runs a built-in or another package. */
-export function scriptOf(command: string): string | undefined {
+export function scriptOf(command: string): ScriptRef | undefined {
   const [tool, ...args] = command.trim().split(/\s+/);
   if (args.some((arg) => OTHER_PACKAGE.has(arg.split("=")[0] ?? ""))) return undefined;
   const [first, second] = args;
   let name: string | undefined;
+  let shorthand = false;
   if (first === "run" || first === "run-script") name = second;
   else if (tool === "npm") name = first === "test" || first === "start" ? first : undefined;
-  else if (tool === "pnpm") name = first && !PNPM_BUILTINS.has(first) ? first : undefined;
-  else if (tool === "yarn") name = first && !YARN_BUILTINS.has(first) ? first : undefined;
+  else if (tool === "pnpm" || tool === "yarn") {
+    name = first && !(tool === "pnpm" ? PNPM_BUILTINS : YARN_BUILTINS).has(first) ? first : undefined;
+    shorthand = name !== "test" && name !== "start";
+  }
   if (!name || name.startsWith("-") || /[<>{}$]/.test(name)) return undefined;
-  return name;
+  return { name, shorthand };
 }
 
 /** GitHub heading anchors: lowercase, punctuation dropped, spaces as hyphens, repeats numbered. */
@@ -75,10 +89,10 @@ async function exists(abs: string): Promise<boolean> {
 }
 
 /**
- * Checks one Markdown file of `repo`; `rel` is its path from the repository root. `scripts` holds the script
- * names of every package.json in the repository, since a doc may tell the reader to run them from another folder.
+ * Checks one Markdown file of `repo`; `rel` is its path from the repository root. `runnables` covers every
+ * package.json in the repository, since a doc may tell the reader to run a script from another folder.
  */
-export async function checkFile(repo: string, rel: string, scripts?: Set<string>): Promise<Finding[]> {
+export async function checkFile(repo: string, rel: string, runnables?: Runnables): Promise<Finding[]> {
   const abs = path.join(repo, rel);
   const dir = path.dirname(abs);
   const text = await readFile(abs, "utf8");
@@ -87,9 +101,12 @@ export async function checkFile(repo: string, rel: string, scripts?: Set<string>
   let fence: { mark: string; shell: boolean } | undefined;
 
   const checkScript = (line: number, command: string) => {
-    if (!/^(pnpm|npm|yarn|bun)\s/.test(command.trim()) || !scripts) return;
-    const name = scriptOf(command);
-    if (name && !scripts.has(name)) add(line, "script", command.trim(), `no package.json in the repository has a "${name}" script`);
+    if (!/^(pnpm|npm|yarn|bun)\s/.test(command.trim()) || !runnables) return;
+    const ref = scriptOf(command);
+    if (!ref || runnables.scripts.has(ref.name)) return;
+    if (ref.shorthand && (!runnables.bins || runnables.bins.has(ref.name))) return;
+    const reason = ref.shorthand ? "no script or installed binary" : "no script";
+    add(line, "script", command.trim(), `${reason} named "${ref.name}" in the repository`);
   };
 
   const lines = text.split("\n");
@@ -139,7 +156,8 @@ export async function checkFile(repo: string, rel: string, scripts?: Set<string>
 
 /**
  * A cited path is local when it starts with `./` or `../`, or when its first segment exists from the file's
- * folder or the repository root. Tokens like `owner/repo` or `@scope/pkg` resolve nowhere and are skipped.
+ * folder or one of its parents up to the repository root. Tokens like `owner/repo` or `@scope/pkg` resolve
+ * nowhere and are skipped.
  */
 async function missingPath(repo: string, dir: string, span: string): Promise<string | undefined> {
   if (!PATH_LIKE.test(span) || span.startsWith("@") || span.split("/").includes("...")) return undefined;
@@ -147,29 +165,41 @@ async function missingPath(repo: string, dir: string, span: string): Promise<str
     return (await exists(path.join(dir, span))) ? undefined : "relative path does not exist";
   }
   const first = span.split("/")[0] ?? "";
-  for (const base of [dir, repo]) {
+  const bases: string[] = [];
+  for (let base = dir; base === repo || base.startsWith(repo + path.sep); base = path.dirname(base)) {
+    bases.push(base);
+    if (base === repo) break;
+  }
+  for (const base of bases) {
     if (await exists(path.join(base, span))) return undefined;
   }
-  for (const base of [dir, repo]) {
+  for (const base of bases) {
     if (await exists(path.join(base, first))) return `"${first}" exists but the full path does not`;
   }
   return undefined;
 }
 
-/** Script names of every tracked or new package.json; undefined when the repository has none. */
-export async function repoScripts(repo: string): Promise<Set<string> | undefined> {
+/** Scripts and runnable binaries of every tracked or new package.json; undefined when the repository has none. */
+export async function repoRunnables(repo: string): Promise<Runnables | undefined> {
   const manifests = await gitFiles(repo, ["package.json", "**/package.json"]);
   if (!manifests.length) return undefined;
-  const names = new Set<string>();
+  const scripts = new Set<string>();
+  const deps = new Set<string>();
+  let installed: Set<string> | undefined;
   for (const manifest of manifests) {
     try {
-      const parsed = JSON.parse(await readFile(path.join(repo, manifest), "utf8")) as { scripts?: Record<string, string> };
-      for (const name of Object.keys(parsed.scripts ?? {})) names.add(name);
+      const parsed = JSON.parse(await readFile(path.join(repo, manifest), "utf8")) as Record<string, Record<string, string> | undefined>;
+      for (const name of Object.keys(parsed.scripts ?? {})) scripts.add(name);
+      for (const field of ["dependencies", "devDependencies"]) {
+        for (const name of Object.keys(parsed[field] ?? {})) deps.add(name.replace(/^@[^/]+\//, ""));
+      }
     } catch {
-      // A broken manifest shows up in the project's own tooling; its scripts just do not count here.
+      // A missing or broken manifest shows up in the project's own tooling; it just does not count here.
     }
+    const bin = await readdir(path.join(repo, path.dirname(manifest), "node_modules", ".bin")).catch(() => undefined);
+    if (bin) installed = new Set([...(installed ?? []), ...bin]);
   }
-  return names;
+  return { scripts, bins: installed && new Set([...installed, ...deps]) };
 }
 
 async function gitFiles(repo: string, patterns: string[]): Promise<string[]> {
@@ -182,16 +212,19 @@ export async function main(argv: string[], print: (line: string) => void = conso
   const [repoArg, ...fileArgs] = positionals;
   if (!repoArg) throw new Error("usage: node doc-refs.mts <repo> [-- <file>...]");
   const repo = path.resolve(repoArg);
-  const files = fileArgs.length ? fileArgs.map((file) => path.relative(repo, path.resolve(repo, file))) : await gitFiles(repo, ["*.md", "*.mdx"]);
-  const scripts = await repoScripts(repo);
+  const listed = fileArgs.length ? fileArgs.map((file) => path.relative(repo, path.resolve(repo, file))) : await gitFiles(repo, ["*.md", "*.mdx"]);
+  // The index still lists a file deleted in the working tree.
+  const files: string[] = [];
+  for (const file of listed) if (await exists(path.join(repo, file))) files.push(file);
+  const runnables = await repoRunnables(repo);
   let count = 0;
   for (const file of files) {
-    for (const finding of await checkFile(repo, file, scripts)) {
+    for (const finding of await checkFile(repo, file, runnables)) {
       count++;
       print(`${finding.file}:${finding.line}: ${finding.kind} ${finding.target}: ${finding.reason}`);
     }
   }
-  print(count ? `doc-refs: ${count} broken reference(s) in ${files.length} file(s)` : `doc-refs: ok (${files.length} file(s))`);
+  print(count ? `doc-refs: ${count} candidate(s) in ${files.length} file(s)` : `doc-refs: ok (${files.length} file(s))`);
   return count ? 1 : 0;
 }
 
