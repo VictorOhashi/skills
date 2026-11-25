@@ -31,7 +31,7 @@ export const LIGHT_MAX_FILES = 8;
 const BULK = /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|Cargo\.lock|Gemfile\.lock|poetry\.lock|go\.sum)$|(^|\/)__snapshots__\/|\.snap$/;
 
 /**
- * Path heuristics for the high-risk list of `send-full`. Skills cannot import each other's scripts, so
+ * Path heuristics for selecting the review tier. Skills cannot import each other's scripts, so
  * `send`'s pr-state script keeps its own copy; change both together. Authentication and payment also
  * match camelCase words (`useAuth.ts`, `PaymentService.ts`).
  */

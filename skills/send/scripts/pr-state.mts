@@ -214,7 +214,7 @@ export function parseThreadPage(payload: unknown): { threads: Thread[]; cursor: 
 // --- Classification ---
 
 /**
- * Path heuristics for the high-risk list of `send-full`: a signal for the agent, not a verdict. Skills cannot
+ * Path heuristics for review context. Skills cannot
  * import each other's scripts, so `review-loop`'s review-scope script keeps its own copy; change both
  * together. Authentication and payment also match camelCase words (`useAuth.ts`, `PaymentService.ts`).
  */
@@ -246,7 +246,7 @@ export function latestReviews(reviews: Review[]): Review[] {
   return [...byAuthor.values()];
 }
 
-/** Human approval that `send-full` accepts: APPROVED on the head SHA by a non-bot account with write access. */
+/** Approvals on the head SHA from human accounts with write access. */
 export function humanApprovalsOnHead(pr: Pr): Review[] {
   return latestReviews(pr.reviews).filter((r) => r.state === "APPROVED" && r.commit === pr.head && !r.author.bot && r.canPush);
 }
@@ -491,7 +491,7 @@ export function render(ref: Ref, pr: Pr, result: Assessment & { reason?: string 
   const riskText = risk.length
     ? risk.map((r) => `${r.area} (${r.files.slice(0, 5).map(inline).join(", ")}${r.files.length > 5 ? ", ..." : ""})`).join("; ")
     : "none matched (path heuristic)";
-  lines.push(`## Merge gate (send-full)\n\n${[
+  lines.push(`## Merge context\n\nApply the review requirements configured by the repository.\n\n${[
     `- Human approval on the head: ${approvals.length ? approvals.map((r) => r.author.login).join(", ") : "none"}`,
     `- High-risk path signals: ${riskText}${pr.filesTruncated ? " (partial: changed files were truncated)" : ""}`,
   ].join("\n")}`);
