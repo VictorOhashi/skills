@@ -44,7 +44,7 @@ So estes trechos ficam. Na duvida sobre a excecao, o trecho sai.
    node <pasta da skill>/scripts/doc-refs.mts <repositorio> --cited-by -- <arquivos do escopo>
    ```
 
-   Ele lista cada linha fora do escopo que nomeia um arquivo do escopo ou um symlink dele, como `CLAUDE.md` para `AGENTS.md`. Nao trunque nenhuma das duas saidas.
+   Ele lista os symlinks de cada arquivo, como `CLAUDE.md` para `AGENTS.md`, e cada linha fora do proprio arquivo e dos seus symlinks que nomeia um deles. Nao trunque nenhuma das duas saidas.
 2. Leia o guia de redacao, o glossario e os templates do repositorio, quando existirem.
 3. Inicie o revisor pela secao da harness. Entregue o escopo, as linhas da linha de base nos arquivos do escopo, as citacoes, o que o passo 2 achou, as Excecoes e os [Criterios do revisor](#criterios-do-revisor), sem reescreve-los.
 4. Confira o diff e o relatorio. Rejeite:
@@ -53,11 +53,11 @@ So estes trechos ficam. Na duvida sobre a excecao, o trecho sai.
    - remocao de parte de frase, ou que deixa incoerente o trecho pai ou os irmaos, como lista anunciada, contagem ou cabecalho;
    - **mover** que altera o texto alem dos alvos relativos, ou que deixa no lugar ponteiro sem gatilho;
    - troca de referencia com alvo ambiguo ou errado;
-   - pendencia com arquivo ou simbolo errado, fora do escopo ou motivo falso.
+   - pendencia com arquivo ou simbolo errado, sobre trecho fora do escopo ou com motivo falso.
    Confira cada prova citada em pendencia, com a saida completa da busca. Trecho mantido sem prova da excecao sai. Remocao duvidosa fica removida.
 5. Se rejeitar uma edicao fora do escopo, um **mover**, uma troca de referencia ou uma pendencia, reverta o trecho e rode o revisor mais uma vez so sobre os trechos rejeitados, nomeando a falha. Se a segunda rodada tambem falhar, relate o trecho como aberto. Remocao de excecao comprovada so exige reverter.
-6. Rode o script de novo, como no passo 1, e compare com a linha de base pelo par arquivo e alvo, nao pela linha. Para cada referencia nova quebrada, reverta a edicao que a quebrou. Dentro do escopo, em vez de reverter, remova tambem o trecho que so existia por ela. Relate cada arquivo fora do escopo afetado. Rode tambem o lint de Markdown e o build de docs do repositorio, quando existirem.
-7. Resolva cada pendencia aceita dentro do escopo em commit separado da remocao, com a verificacao que ela exigir. Relate a pendencia fora do escopo, com o trecho mantido, e proponha uma issue.
+6. Rode de novo o primeiro comando do passo 1 e compare com a linha de base pelo par arquivo e alvo, nao pela linha. Para cada referencia nova quebrada, reverta a edicao que a quebrou. Dentro do escopo, em vez de reverter, remova tambem o trecho que so existia por ela. Relate cada arquivo fora do escopo afetado. Rode tambem o lint de Markdown e o build de docs do repositorio, quando existirem.
+7. Para cada pendencia aceita que cabe nesta entrega, construa a garantia em commit separado da remocao, com a verificacao que ela exigir, e so entao remova o trecho. Para as demais, mantenha o trecho, relate a pendencia e proponha uma issue.
 8. Relate a quantidade de remocoes, os trechos movidos com origem e destino, as trocas de referencia, os mantidos com a excecao, as rodadas extras, as pendencias resolvidas e as abertas.
 
 ## Criterios do revisor
@@ -69,6 +69,7 @@ Classifique cada paragrafo, item de lista, linha de tabela ou secao do escopo co
   - lista de scripts, dependencias, pastas ou configuracao que o manifesto, as configs ou o `--help` ja entregam;
   - regra escrita em outro arquivo ou secao; cite o dono, que mantem o texto;
   - referencia confirmada como morta, com o trecho que so existia por ela;
+  - texto que descreve comportamento que o codigo contradiz, quando o codigo esta certo;
   - historico, changelog narrado, motivacao, status de trabalho, nota ao revisor, data ou contagem que envelhece.
   Nao reescreva o texto numa versao mais curta.
 - **Manter:** cite a excecao e a prova no codigo, nas configs ou na fonte externa. Numa regra mantida com referencia morta, faca a troca de referencia so quando o alvo atual for inequivoco; sem alvo inequivoco, o trecho sai. De o trecho antigo e o novo.
@@ -76,9 +77,9 @@ Classifique cada paragrafo, item de lista, linha de tabela ou secao do escopo co
   - Instrucao persistente que vale so para um tipo de tarefa: para a skill ou o arquivo lido nessa tarefa.
   - Detalhe que so parte do procedimento usa: para um arquivo de referencia, com ponteiro e gatilho no lugar.
   - Sem destino pela convencao do repositorio, o trecho vira pendencia.
-- **Pendencia:** a garantia vira item fora do texto, com arquivo e a menor mudanca, em uma linha. O trecho sai so quando a garantia cabe no escopo; fora dele, o trecho fica ate ela existir.
+- **Pendencia:** o trecho fica, e a garantia vira item fora do texto, com arquivo, a menor mudanca e a prova (busca e resultado), em uma linha. O trecho sai no passo 7, quando a garantia entrar.
   - Regra que lint, hook, tipo, teste ou script pode garantir: construir a verificacao.
-  - Texto que descreve comportamento que o codigo contradiz: o texto sai; se o codigo estiver errado, corrigir o codigo.
+  - Texto que descreve comportamento que o codigo contradiz, com o codigo errado: corrigir o codigo.
   - Trecho a mover sem destino: criar o destino.
 - Enfase, caixa alta, `IMPORTANTE`, `sempre` e `nunca` sao pista, nao prova. Confira no codigo, nas configs e no historico com `git log` e `git blame`.
 - Ao buscar o nome de um arquivo como prova, inclua os symlinks que as citacoes mostram.

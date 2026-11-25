@@ -1,6 +1,6 @@
 // Lists references in Markdown files that no longer resolve: relative links and anchors, local paths
 // cited in inline code, and package scripts run through pnpm, npm, yarn or bun.
-// With --cited-by, lists instead every line outside the given files that names them or a symlink to them.
+// With --cited-by, lists instead every line outside each given file and its symlinks that names one of them.
 // Usage: node doc-refs.mts <repo> [--cited-by] [-- <file>...]   (no files: every tracked or new .md/.mdx file)
 // Requires Node 22.18+ (type stripping) and git.
 import { execFile } from "node:child_process";
@@ -215,28 +215,29 @@ async function gitFiles(repo: string, patterns: string[]): Promise<string[]> {
   return [...new Set(stdout.split("\0").filter(Boolean))].sort();
 }
 
-/** Tracked symlinks whose target is `rel`, as paths from the repository root. */
-async function aliasesOf(repo: string, rel: string): Promise<string[]> {
+/** Every tracked symlink of the repository, mapped to its target as a path from the repository root. */
+export async function repoLinks(repo: string): Promise<Map<string, string>> {
   const { stdout } = await exec("git", ["-C", repo, "ls-files", "-s", "-z"], { maxBuffer: 64 * 1024 * 1024 });
-  const aliases: string[] = [];
+  const links = new Map<string, string>();
   for (const entry of stdout.split("\0")) {
-    const match = /^120000 \S+ \d+\t(.+)$/.exec(entry);
-    if (!match?.[1]) continue;
-    const link = match[1];
+    const link = /^120000 \S+ \d+\t(.+)$/.exec(entry)?.[1];
+    if (!link) continue;
     const target = await readlink(path.join(repo, link)).catch(() => undefined);
-    if (target && path.normalize(path.join(path.dirname(link), target)) === path.normalize(rel)) aliases.push(link);
+    if (target) links.set(link, path.relative(repo, path.resolve(repo, path.dirname(link), target)));
   }
-  return aliases.sort();
+  return links;
 }
 
 /**
  * Lines of tracked or new files that name `rel` or one of its symlinks by file name, outside those files.
+ * When `rel` is itself a symlink, its target and the target's other symlinks count too.
  * A name shared by many files (`README.md`) also matches citations of the others: each line is a candidate.
  */
-export async function citationsOf(repo: string, rel: string): Promise<Citation[]> {
-  const own = [rel, ...(await aliasesOf(repo, rel))];
+export async function citationsOf(repo: string, rel: string, links: Map<string, string>): Promise<{ aliases: string[]; citations: Citation[] }> {
+  const target = links.get(rel) ?? rel;
+  const own = [target, ...[...links].filter(([, to]) => to === target).map(([link]) => link).sort()];
   const names = [...new Set(own.map((file) => path.basename(file)))];
-  const args = ["-C", repo, "grep", "--untracked", "-n", "-I", "-F", ...names.flatMap((name) => ["-e", name]), "--", ".", ...own.map((file) => `:(exclude,top)${file}`)];
+  const args = ["-C", repo, "grep", "--untracked", "-z", "-n", "-I", "-F", ...names.flatMap((name) => ["-e", name]), "--", ".", ...own.map((file) => `:(exclude,top,literal)${file}`)];
   const stdout = await exec("git", args, { maxBuffer: 64 * 1024 * 1024 }).then(
     (result) => result.stdout,
     (error: { code?: number; stdout?: string }) => {
@@ -246,13 +247,14 @@ export async function citationsOf(repo: string, rel: string): Promise<Citation[]
     },
   );
   const citations: Citation[] = [];
-  for (const line of stdout.split("\n")) {
-    const match = /^(.+?):(\d+):(.*)$/.exec(line);
-    if (!match?.[1] || !match[2]) continue;
-    const text = (match[3] ?? "").trim();
-    citations.push({ cited: rel, file: match[1], line: Number(match[2]), text: text.length > CITATION_TEXT ? `${text.slice(0, CITATION_TEXT)}...` : text });
+  // With -z, each hit is `file\0line\0text`.
+  for (const hit of stdout.split("\n")) {
+    const [file, line, ...rest] = hit.split("\0");
+    if (!file || !line) continue;
+    const text = rest.join("\0").trim();
+    citations.push({ cited: rel, file, line: Number(line), text: text.length > CITATION_TEXT ? `${text.slice(0, CITATION_TEXT)}...` : text });
   }
-  return citations;
+  return { aliases: own.filter((file) => file !== rel), citations };
 }
 
 export async function main(argv: string[], print: (line: string) => void = console.log): Promise<number> {
@@ -269,9 +271,11 @@ export async function main(argv: string[], print: (line: string) => void = conso
   }
   if (values["cited-by"]) {
     if (!fileArgs.length) throw new Error("--cited-by needs the files to look up after --");
+    const links = await repoLinks(repo);
     let total = 0;
     for (const file of files) {
-      const citations = await citationsOf(repo, file);
+      const { aliases, citations } = await citationsOf(repo, file, links);
+      if (aliases.length) print(`${file} aliases: ${aliases.join(", ")}`);
       total += citations.length;
       for (const citation of citations) print(`${citation.cited} <- ${citation.file}:${citation.line}: ${citation.text}`);
     }
